@@ -1,0 +1,124 @@
+name: Build firmware and deploy flasher
+
+# Builds the ESP32-C5 sketch with arduino-cli, merges the ESP-IDF image parts
+# into one file the web flasher can write at offset 0, and publishes the
+# flasher to GitHub Pages.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'firmware/**'
+      - 'flasher/**'
+      - '.github/workflows/build-flasher.yml'
+  pull_request:
+    paths:
+      - 'firmware/**'
+      - 'flasher/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install arduino-cli
+        run: |
+          curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh
+          echo "$PWD/bin" >> $GITHUB_PATH
+
+      - name: Add the stable ESP32 board index
+        # Deliberately the stable index, not package_esp32_dev_index.json: the
+        # dev index serves pre-release alphas and an unpinned install grabs the
+        # highest version, which is not reproducible.
+        run: |
+          arduino-cli config init
+          arduino-cli config add board_manager.additional_urls \
+            "https://espressif.github.io/arduino-esp32/package_esp32_index.json"
+          arduino-cli core update-index
+
+      - name: Install ESP32 core
+        # 3.3.0 is the first STABLE core carrying the ESP32-C5 target.
+        run: arduino-cli core install esp32:esp32@3.3.0
+
+      - name: Compile
+        # No external libraries by design — the NMEA and UBX parsing is ours,
+        # so CI has nothing to pin beyond the core itself.
+        run: |
+          arduino-cli compile \
+            --fqbn "esp32:esp32:esp32c5:CDCOnBoot=cdc" \
+            --export-binaries \
+            firmware/savethesat_c5
+
+      - name: Install esptool
+        # Pinned: v5 renamed the subcommands (merge_bin -> merge-bin) and the
+        # flag spellings below follow v5. An unpinned v4 would reject them.
+        run: pip install 'esptool~=5.0'
+
+      - name: Merge image and stage the site
+        run: |
+          mkdir -p site/firmware
+          cp -r flasher/. site/
+
+          BOOT_APP0=$(find ~/.arduino15/packages/esp32 -name boot_app0.bin | head -n 1)
+          [ -n "$BOOT_APP0" ] || { echo "::error::boot_app0.bin not found"; exit 1; }
+
+          BUILD_DIR=$(find firmware/savethesat_c5/build \
+            -name "savethesat_c5.ino.bin" -printf '%h\n' | head -n 1)
+          [ -n "$BUILD_DIR" ] || { echo "::error::build output not found"; exit 1; }
+
+          # The ESP32-C5 second-stage bootloader lives at 0x2000, NOT 0x0 like
+          # the S3 and C6. --target-offset 0x0 pads from zero so the manifest
+          # can still flash the merged file at offset 0.
+          python -m esptool --chip esp32c5 merge-bin \
+            --output site/firmware/savethesat-c5.bin \
+            --flash-mode dio --flash-freq 80m --flash-size 4MB \
+            --target-offset 0x0 \
+            0x2000  "$BUILD_DIR/savethesat_c5.ino.bootloader.bin" \
+            0x8000  "$BUILD_DIR/savethesat_c5.ino.partitions.bin" \
+            0xe000  "$BOOT_APP0" \
+            0x10000 "$BUILD_DIR/savethesat_c5.ino.bin"
+
+          FW_VERSION=$(grep -oP '(?<=^#define FW_VERSION ")[^"]+' firmware/savethesat_c5/config.h)
+          BUILD="${FW_VERSION}.${GITHUB_SHA::7}"
+          jq --arg v "$BUILD" '.version = $v' site/manifest-savethesat-c5.json > site/m.tmp
+          mv site/m.tmp site/manifest-savethesat-c5.json
+          printf '{"build":"%s","fw":"%s","sha":"%s","date":"%s"}\n' \
+            "$BUILD" "$FW_VERSION" "${GITHUB_SHA::7}" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            > site/version.json
+
+          ls -lh site/firmware
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: savethesat-c5-firmware
+          path: site/firmware/savethesat-c5.bin
+
+      - uses: actions/configure-pages@v5
+        if: github.ref == 'refs/heads/main'
+
+      - uses: actions/upload-pages-artifact@v3
+        if: github.ref == 'refs/heads/main'
+        with:
+          path: site
+
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

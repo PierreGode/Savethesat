@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Savethesat — flash a GPS jamming detector</title>
+<meta name="description" content="Open-source GPS/GNSS jamming detector firmware for the ESP32-C5. Flash it from your browser.">
+<link rel="stylesheet" href="css/style.css">
+</head><body><div class="wrap">
+
+<h1>SAVETHESAT</h1>
+<p class="tag">An open GPS jamming detector you can build for the price of a takeaway.
+Flash it here, power it from a USB bank, watch the map fill in.</p>
+
+<div class="card">
+  <button id="flash-btn" onclick="flashDevice('manifest-savethesat-c5.json')">
+    Flash ESP32-C5
+  </button>
+  <p id="browser-warn" hidden class="warn" style="margin-top:14px">
+    Flashing uses Web Serial, which only exists in desktop Chrome, Edge and Opera.
+    Firefox, Safari and every phone browser cannot do it. The device's own
+    dashboard works fine on a phone afterwards — it is only this step that needs a laptop.
+  </p>
+</div>
+
+<h2>What it detects</h2>
+<p>A jammer does not announce itself. What it leaves behind is measurable, and
+a u-blox receiver reports all of it over UART:</p>
+<table>
+  <tr><th>Signal</th><th>What it means</th></tr>
+  <tr><td>Jamming indicator</td><td>u-blox's own 0–255 interference estimate</td></tr>
+  <tr><td>AGC level</td><td>Falls as the front end backs off from rising input power</td></tr>
+  <tr><td>C/N0 collapse</td><td>Satellites still in view, but carrier-to-noise gone</td></tr>
+  <tr><td>Fix lost, sats visible</td><td>Separates jamming from simply having no sky</td></tr>
+  <tr><td>Noise per ms</td><td>Broadband noise floor at the receiver</td></tr>
+</table>
+<p>Each is scored against a baseline the device learns for itself in its first
+minute. The dashboard shows every contribution separately, so you can see
+<em>why</em> it reached a verdict rather than taking its word for it.</p>
+
+<h2>Hardware</h2>
+<table>
+  <tr><th>Part</th><th>Notes</th></tr>
+  <tr><td>Seeed XIAO ESP32-C5</td><td>Any ESP32-C5 board works</td></tr>
+  <tr><td>u-blox GNSS ×1 or ×2</td><td><strong>Must be u-blox</strong> — M10 or M9N ideal, M8N fine</td></tr>
+  <tr><td>USB power bank</td><td>Runs all day</td></tr>
+</table>
+<p class="warn">Cheap non-u-blox modules (ATGM336H, generic MTK) output NMEA only
+and have no jamming indicator. They will not work for the primary detection.</p>
+
+<h2>Wiring</h2>
+<table>
+  <tr><th>Signal</th><th>GPIO</th></tr>
+  <tr><td>GNSS A — module TX → ESP RX</td><td><code>12</code></td></tr>
+  <tr><td>GNSS A — module RX ← ESP TX</td><td><code>11</code></td></tr>
+  <tr><td>GNSS B — module TX → ESP RX</td><td><code>4</code></td></tr>
+  <tr><td>GNSS B — module RX ← ESP TX</td><td><code>5</code></td></tr>
+</table>
+<p>Both modules at 9600 baud. A single module on port A is enough to start —
+port B simply reports as absent.</p>
+
+<h2>After flashing</h2>
+<ol>
+  <li>Power-cycle the board.</li>
+  <li>Join the Wi-Fi network <code>Savethesat-XXXX</code>, password <code>savethesat</code>.</li>
+  <li>Open <code>http://192.168.4.1/</code> — or <code>http://savethesat.local/</code>.</li>
+</ol>
+<p>The access point deliberately offers no internet and runs no captive portal.
+Your phone notices there is no uplink, keeps mobile data as its default route,
+and still reaches the dashboard over Wi-Fi. Both work at once.</p>
+
+<h2>Rules of the road</h2>
+<p><strong>Receive only.</strong> Savethesat listens. It never transmits in a
+GNSS band, and it never will. Detecting and mapping interference is lawful
+nearly everywhere; transmitting in these bands is not, anywhere.</p>
+
+<footer>
+  <a href="https://github.com/PierreGode/Savethesat">Source on GitHub</a> ·
+  MIT licensed · <span id="build"></span>
+</footer>
+
+</div>
+
+<div class="overlay" id="flash-overlay" hidden><div class="panel">
+  <strong id="flash-status">Initializing…</strong>
+  <div id="flash-log"></div>
+  <div class="track"><b id="flash-bar"></b></div>
+  <div class="pct" id="flash-pct"></div>
+  <div id="flash-confirm-row" hidden style="margin-top:14px;display:flex;gap:10px">
+    <button id="flash-go">Flash now</button>
+    <button id="flash-cancel" class="ghost">Cancel</button>
+  </div>
+  <div style="margin-top:14px">
+    <button id="flash-close" class="ghost" hidden onclick="closeOverlay()">Close</button>
+  </div>
+</div></div>
+
+<script type="module" src="js/flasher.js"></script>
+<script>
+fetch('version.json',{cache:'no-store'}).then(r=>r.json())
+  .then(v=>{document.getElementById('build').textContent='build '+v.build;})
+  .catch(()=>{});
+</script>
+</body></html>
