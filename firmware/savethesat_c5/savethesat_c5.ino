@@ -118,6 +118,66 @@ static void handleStatus() {
   server.send(200, "application/json", o);
 }
 
+/* GNSS health: the link plumbing, per-constellation view and sky positions.
+ * Kept off /api/status because the sky array is large and the dashboard polls
+ * status every second. */
+static void gnssJson(String &o, GnssRx &r, int uart, int rx, int tx, uint32_t baud) {
+  uint32_t now = millis();
+  o += "{\"present\":"; o += r.present ? "true" : "false";
+  o += ",\"uart\":";    o += uart;
+  o += ",\"rx\":";      o += rx;
+  o += ",\"tx\":";      o += tx;
+  o += ",\"baud\":";    o += baud;
+  o += ",\"bytes\":";   o += r.rxBytes;
+  /* Cast: the unsigned subtraction would turn the -1 sentinel into 4294967295. */
+  o += ",\"nmeaAge\":"; o += r.lastNmeaMs ? (int32_t)((now - r.lastNmeaMs) / 1000) : -1;
+  o += ",\"ubxAge\":";  o += r.lastUbxMs ? (int32_t)((now - r.lastUbxMs) / 1000) : -1;
+  o += ",\"mod\":\"";  o += r.haveVer ? r.modName : "";
+  o += "\",\"sw\":\"";  o += r.haveVer ? r.swVer : "";
+  o += "\",\"hw\":\"";  o += r.haveVer ? r.hwVer : "";
+  o += "\",\"telemetry\":\"";
+  o += r.haveMonRf ? "MON-RF" : (r.haveUbx ? "MON-HW" : (r.present ? "none" : ""));
+  o += "\",\"fix\":";  o += r.fixValid ? "true" : "false";
+  o += ",\"ttff\":";    o += r.firstFixMs ? (int32_t)(r.firstFixMs / 1000) : -1;
+  o += ",\"searching\":";
+  o += r.fixValid ? 0 : (int32_t)((now - (r.noFixSince ? r.noFixSince : 0)) / 1000);
+  o += ",\"antenna\":"; o += r.antStatus;
+  o += ",\"cons\":[";
+  bool first = true;
+  for (uint8_t i = 0; i < NCONS; i++) {
+    if (!r.consInView[i]) continue;
+    if (!first) o += ",";
+    first = false;
+    o += "{\"name\":\""; o += CONS_NAMES[i];
+    o += "\",\"inView\":"; o += r.consInView[i];
+    o += ",\"tracked\":";  o += r.consTracked[i];
+    o += ",\"snrMax\":";   o += r.consSnrMax[i];
+    o += "}";
+  }
+  o += "],\"sky\":[";
+  for (uint8_t i = 0; i < r.skyN; i++) {
+    if (i) o += ",";
+    o += "{\"c\":\""; o += CONS_NAMES[r.sky[i].cons];
+    o += "\",\"prn\":"; o += r.sky[i].prn;
+    o += ",\"el\":";     o += r.sky[i].elev;
+    o += ",\"az\":";     o += r.sky[i].az;
+    o += ",\"snr\":";    o += r.sky[i].snr;
+    o += "}";
+  }
+  o += "]}";
+}
+
+static void handleGnss() {
+  String o;
+  o.reserve(4096);
+  o = "{\"a\":";
+  gnssJson(o, gpsA, GPS_A_UART, GPS_A_RX, GPS_A_TX, GPS_A_BAUD);
+  o += ",\"b\":";
+  gnssJson(o, gpsB, GPS_B_UART, GPS_B_RX, GPS_B_TX, GPS_B_BAUD);
+  o += "}";
+  server.send(200, "application/json", o);
+}
+
 static void handleHistory() {
   String o;
   o.reserve(HISTORY_LEN * 12 + 64);
@@ -191,6 +251,7 @@ void setup() {
   });
   server.on("/api/status",  HTTP_GET,  handleStatus);
   server.on("/api/history", HTTP_GET,  handleHistory);
+  server.on("/api/gnss",    HTTP_GET,  handleGnss);
   server.on("/savethesat.csv", HTTP_GET, handleCsv);
   server.on("/api/reset-baseline", HTTP_POST, handleRebase);
   server.onNotFound([]() { server.send(404, "text/plain", "not found"); });

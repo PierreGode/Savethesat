@@ -11,6 +11,37 @@
 
 #define NMEA_MAX 100
 #define SNR_WINDOW 48
+#define MAX_SKY    40
+#define NCONS       6
+
+/* One satellite as GSV reports it. */
+struct SatView {
+  uint8_t  cons;   /* index into CONS_NAMES */
+  uint8_t  prn;
+  int8_t   elev;
+  uint16_t az;
+  uint8_t  snr;    /* 0 = in view but not tracked */
+};
+
+static const char *const CONS_NAMES[NCONS] =
+  { "GPS", "GLONASS", "Galileo", "BeiDou", "QZSS", "combined" };
+
+/* NMEA talker id -> constellation. A receiver that emits only GN has merged
+ * them, which is itself worth seeing. */
+static inline uint8_t consIndex(char a, char b) {
+  if (a == 'G') {
+    switch (b) {
+      case 'P': return 0;
+      case 'L': return 1;
+      case 'A': return 2;
+      case 'B': return 3;
+      case 'Q': return 4;
+      case 'N': return 5;
+    }
+  }
+  if (a == 'B' && b == 'D') return 3;
+  return 5;
+}
 
 class GnssRx {
  public:
@@ -33,6 +64,18 @@ class GnssRx {
   uint8_t  satsVisible = 0;
   float    cn0Top = 0;        /* mean C/N0 of the strongest 8 satellites */
   uint8_t  cn0Tracked = 0;    /* satellites reporting a non-zero C/N0 */
+
+  /* sky view and per-constellation health */
+  SatView  sky[MAX_SKY];
+  uint8_t  skyN = 0;
+  uint8_t  consInView[NCONS]  = {0};
+  uint8_t  consTracked[NCONS] = {0};
+  uint8_t  consSnrMax[NCONS]  = {0};
+
+  /* fix timing */
+  uint32_t firstFixMs = 0;    /* 0 until the first fix ever */
+  uint32_t noFixSince = 0;    /* when the current search started */
+  uint32_t lastNmeaMs = 0;
 
   /* identity (UBX-MON-VER) — tells us the module really is u-blox, and which */
   bool     haveVer = false;
@@ -106,6 +149,19 @@ class GnssRx {
     satsVisible = visAcc_;
     visAcc_ = 0;
 
+    /* Publish the sky view and per-constellation counts gathered this second.
+     * GSV arrives in bursts, so it is collected into a staging buffer and
+     * swapped in whole — a half-updated sky plot would flicker badly. */
+    memcpy(sky, skyAcc_, sizeof(SatView) * skyAccN_);
+    skyN = skyAccN_;
+    skyAccN_ = 0;
+    for (uint8_t i = 0; i < NCONS; i++) {
+      consInView[i]  = cvAcc_[i];
+      consTracked[i] = ctAcc_[i];
+      consSnrMax[i]  = csAcc_[i];
+      cvAcc_[i] = ctAcc_[i] = csAcc_[i] = 0;
+    }
+
     updateBaseline();
   }
 
@@ -137,6 +193,11 @@ class GnssRx {
   float    snr_[SNR_WINDOW];
   uint8_t  snrN_ = 0;
   uint8_t  visAcc_ = 0;
+
+  SatView  skyAcc_[MAX_SKY];
+  uint8_t  skyAccN_ = 0;
+  uint8_t  cvAcc_[NCONS] = {0}, ctAcc_[NCONS] = {0}, csAcc_[NCONS] = {0};
+  bool     prevFix_ = false;
 
   double   warmJam_ = 0, warmAgc_ = 0, warmNoise_ = 0, warmCn0_ = 0;
   uint32_t warmN_ = 0, warmCn0N_ = 0;
@@ -246,9 +307,16 @@ class GnssRx {
     return d;
   }
 
+  void noteFix() {
+    if (fixValid && !prevFix_ && !firstFixMs) firstFixMs = millis();
+    if (!fixValid && prevFix_) noFixSince = millis();
+    prevFix_ = fixValid;
+  }
+
   void parseNmea() {
     if (line_[0] != '$' || lineN_ < 7) return;
     touch();
+    lastNmeaMs = millis();
     const char *t = line_ + 3;           /* skip "$xx" — any talker */
     char a[16], b[8];
 
@@ -261,20 +329,42 @@ class GnssRx {
       field(4, a, sizeof a); field(5, b, sizeof b);
       if (a[0]) lon = nmeaDeg(a, b);
       fixValid = fixQuality > 0;
+      noteFix();
     } else if (!strncmp(t, "RMC", 3)) {
       field(2, a, sizeof a);
       fixValid = (a[0] == 'A');
+      noteFix();
       field(7, a, sizeof a); if (a[0]) speedKn = atof(a);
     } else if (!strncmp(t, "GSV", 3)) {
+      uint8_t ci = consIndex(line_[1], line_[2]);
       field(3, a, sizeof a);
       uint8_t vis = atoi(a);
       if (vis > visAcc_) visAcc_ = vis;
+      if (vis > cvAcc_[ci]) cvAcc_[ci] = vis;
+
       /* up to four satellites per sentence: prn, elev, azim, cno */
       for (uint8_t s = 0; s < 4; s++) {
-        field(7 + s * 4, a, sizeof a);
-        if (!a[0]) continue;
-        float v = atof(a);
-        if (v > 0 && snrN_ < SNR_WINDOW) snr_[snrN_++] = v;
+        char pr[16], el[16], az[16];
+        field(4 + s * 4, pr, sizeof pr);
+        if (!pr[0]) continue;
+        field(5 + s * 4, el, sizeof el);
+        field(6 + s * 4, az, sizeof az);
+        field(7 + s * 4, a,  sizeof a);
+        uint8_t cno = a[0] ? (uint8_t)atoi(a) : 0;
+
+        if (cno > 0) {
+          if (snrN_ < SNR_WINDOW) snr_[snrN_++] = cno;
+          ctAcc_[ci]++;
+          if (cno > csAcc_[ci]) csAcc_[ci] = cno;
+        }
+        if (skyAccN_ < MAX_SKY) {
+          SatView &v = skyAcc_[skyAccN_++];
+          v.cons = ci;
+          v.prn  = (uint8_t)atoi(pr);
+          v.elev = el[0] ? (int8_t)atoi(el) : -1;
+          v.az   = az[0] ? (uint16_t)atoi(az) : 0;
+          v.snr  = cno;
+        }
       }
     }
   }
