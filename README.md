@@ -22,6 +22,7 @@ and put it on a windowsill, a mast or a dashboard.
 - **Detects** interference from five independent signals, and shows its working
 - **Self-baselining** — no site survey, no calibration, no magic numbers
 - **Phone dashboard** over its own AP, with **your mobile data still working**
+- **OLED status screen** when one is fitted, headless when it is not
 - **ESP-NOW mesh** so several nodes can be worked as a network
 - **Browser flasher** — no toolchain, no IDE, no Arduino install
 - **Receive only.** It never transmits in a GNSS band.

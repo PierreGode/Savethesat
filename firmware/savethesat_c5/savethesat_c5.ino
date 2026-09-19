@@ -16,6 +16,7 @@
 #include "gnss.h"
 #include "detect.h"
 #include "espnow_link.h"
+#include "display.h"
 #include "webui.h"
 
 static HardwareSerial SerialA(GPS_A_UART);
@@ -29,6 +30,8 @@ static WebServer server(80);
 static uint8_t  hJamA[HISTORY_LEN], hJamB[HISTORY_LEN], hScore[HISTORY_LEN], hLvl[HISTORY_LEN];
 static uint16_t hHead = 0, hCount = 0;
 
+static char g_ssid[33] = {0};
+static char g_ip[17]   = {0};
 static uint8_t g_level = LVL_WARMUP;
 static uint8_t g_score = 0;
 static bool    g_localOnly = false;
@@ -175,6 +178,8 @@ void setup() {
 
   const char *pw = strlen(AP_PASSWORD) >= 8 ? AP_PASSWORD : nullptr;
   WiFi.softAP(ssid, pw, AP_CHANNEL);
+  strncpy(g_ssid, ssid, sizeof g_ssid - 1);
+  strncpy(g_ip, WiFi.softAPIP().toString().c_str(), sizeof g_ip - 1);
 
   /* No DNS server and no default route are offered on purpose — see the note
    * on the dashboard. A captive portal here would cost the operator their
@@ -194,6 +199,8 @@ void setup() {
 #if ESPNOW_ENABLED
   satnowBegin();
 #endif
+
+  Serial.printf("  OLED: %s\n", displayBegin() ? "found" : "not fitted");
 
   Serial.printf("\nSavethesat %s\n  AP  : %s\n  URL : http://%s/ or http://%s.local/\n",
                 FW_VERSION, ssid, WiFi.softAPIP().toString().c_str(), MDNS_HOST);
@@ -244,6 +251,9 @@ void loop() {
     if (g_level == LVL_CLEAR) { gpsA.driftBaseline(); gpsB.driftBaseline(); }
 
     pushHistory();
+
+    displayShow(g_ssid, g_ip, g_level, g_score, warmupLeftS(),
+                gpsA, gpsB, satnowPeerCount());
   }
 
 #if DEBUG_INTERVAL_MS

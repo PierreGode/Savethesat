@@ -5,6 +5,7 @@
 | Part | Notes |
 |---|---|
 | Seeed XIAO ESP32-C5 | Any ESP32-C5 board works; pins are all remappable |
+| SSD1306 OLED (optional) | 128x64 on I2C; absent is fine, the firmware runs headless |
 | u-blox GNSS module ×1–2 | **Must be u-blox.** M10 or M9N ideal, M8N acceptable |
 | GNSS antenna ×1–2 | Active patch antenna |
 | USB-C power bank | Runs the board all day |
@@ -25,6 +26,8 @@ Defaults, all changeable in `firmware/savethesat_c5/config.h`:
 
 | Signal | GPIO | Note |
 |---|---|---|
+| OLED SDA | 23 | SSD1306 at 0x3C, probed at boot |
+| OLED SCL | 24 | |
 | GNSS A — module TX → ESP RX | 12 | HP UART1 |
 | GNSS A — module RX ← ESP TX | 11 | |
 | GNSS B — module TX → ESP RX | 4 | HP UART0 |

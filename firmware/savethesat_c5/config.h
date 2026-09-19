@@ -32,6 +32,16 @@
 #define AP_CHANNEL     6              /* 2.4 GHz for phone compatibility */
 #define MDNS_HOST      "savethesat"
 
+/* ── Display ───────────────────────────────────────────────────────────────
+ * SSD1306 OLED on the documented C5 I2C bus. Probed at boot; if it does not
+ * answer, the firmware runs headless without complaint. */
+#define OLED_ENABLED  1
+#define OLED_SDA      23
+#define OLED_SCL      24
+#define OLED_ADDR     0x3C
+#define OLED_W        128
+#define OLED_H        64
+
 /* ── Sampling and detection ───────────────────────────────────────────────── */
 #define SAMPLE_INTERVAL_MS   1000
 #define UBX_POLL_INTERVAL_MS 1000

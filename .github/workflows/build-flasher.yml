@@ -51,9 +51,15 @@ jobs:
         # 3.3.0 is the first STABLE core carrying the ESP32-C5 target.
         run: arduino-cli core install esp32:esp32@3.3.0
 
+      - name: Install Arduino libraries
+        # Only the OLED driver is external; the NMEA and UBX parsing is ours.
+        # Pinned so a future release cannot silently change the build.
+        run: |
+          arduino-cli lib install "Adafruit SSD1306"@2.5.17
+          arduino-cli lib install "Adafruit GFX Library"@1.12.6
+          arduino-cli lib install "Adafruit BusIO"@1.17.4
+
       - name: Compile
-        # No external libraries by design — the NMEA and UBX parsing is ours,
-        # so CI has nothing to pin beyond the core itself.
         run: |
           arduino-cli compile \
             --fqbn "esp32:esp32:esp32c5:CDCOnBoot=cdc" \
