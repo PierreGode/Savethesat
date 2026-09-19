@@ -1,0 +1,14 @@
+{
+  "name": "Savethesat GPS Jamming Detector",
+  "version": "0.1.0",
+  "funding_url": "https://github.com/PierreGode/Savethesat",
+  "new_install_prompt_erase": true,
+  "builds": [
+    {
+      "chipFamily": "ESP32-C5",
+      "parts": [
+        { "path": "firmware/savethesat-c5.bin", "offset": 0 }
+      ]
+    }
+  ]
+}
