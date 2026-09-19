@@ -34,6 +34,13 @@ class GnssRx {
   float    cn0Top = 0;        /* mean C/N0 of the strongest 8 satellites */
   uint8_t  cn0Tracked = 0;    /* satellites reporting a non-zero C/N0 */
 
+  /* identity (UBX-MON-VER) — tells us the module really is u-blox, and which */
+  bool     haveVer = false;
+  char     swVer[31] = {0};
+  char     hwVer[11] = {0};
+  char     modName[21] = {0};
+  uint32_t rxBytes = 0;
+
   /* interference telemetry (UBX) */
   bool     haveUbx      = false;
   bool     haveMonRf    = false;   /* M9/M10 — gives jammingState too */
@@ -51,6 +58,7 @@ class GnssRx {
   void begin(char lbl, HardwareSerial *port, int uartNum, int rx, int tx, uint32_t baud) {
     label = lbl;
     port_ = port;
+    port_->setRxBufferSize(1024);
     port_->begin(baud, SERIAL_8N1, rx, tx);
     (void)uartNum;
     ubx_.begin(&GnssRx::onUbx, this);
@@ -61,6 +69,7 @@ class GnssRx {
   void service() {
     while (port_ && port_->available()) {
       uint8_t b = (uint8_t)port_->read();
+      rxBytes++;
       ubx_.feed(b);
       feedNmea((char)b);
     }
@@ -73,6 +82,7 @@ class GnssRx {
     if (!port_) return;
     ubxPoll(*port_, UBX_CLASS_MON, UBX_ID_MON_RF);
     ubxPoll(*port_, UBX_CLASS_MON, UBX_ID_MON_HW);
+    if (!haveVer) ubxPoll(*port_, UBX_CLASS_MON, UBX_ID_MON_VER);
   }
 
   /* Collapse the last second of GSV reports into one C/N0 figure. */
@@ -174,6 +184,19 @@ class GnssRx {
       self->haveUbx      = true;
       self->haveMonRf    = true;
       self->lastUbxMs    = millis();
+    } else if (id == UBX_ID_MON_VER && len >= 40) {
+      memcpy(self->swVer, p, 30);      self->swVer[30] = 0;
+      memcpy(self->hwVer, p + 30, 10); self->hwVer[10] = 0;
+      /* Extensions are 30-byte strings; the module name arrives as "MOD=..." */
+      for (uint16_t e = 40; e + 30 <= len; e += 30) {
+        if (!memcmp(p + e, "MOD=", 4)) {
+          memcpy(self->modName, p + e + 4, 20);
+          self->modName[20] = 0;
+          break;
+        }
+      }
+      if (!self->modName[0]) snprintf(self->modName, sizeof self->modName, "hw %s", self->hwVer);
+      self->haveVer = true;
     } else if (id == UBX_ID_MON_HW && len >= 60 && !self->haveMonRf) {
       /* M8 layout: noisePerMS@16, agcCnt@18, aStatus@20, jamInd@45 */
       self->noisePerMs = (uint16_t)p[16] | ((uint16_t)p[17] << 8);

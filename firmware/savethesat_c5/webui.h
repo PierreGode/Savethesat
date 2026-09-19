@@ -97,7 +97,8 @@ const F=(v,d)=>v==null?'--':(d?v.toFixed(d):v);
 function rxCard(r,n){
   const b=x=>`<div class="bar"><i>${x[0]}</i><u><b style="width:${x[1]}%"></b></u></div>`;
   return `<div class="card"><h2><span class="dot ${r.present?'on':''}"></span>
-  Receiver ${n} ${r.ubx?(r.monrf?'&middot; MON-RF':'&middot; MON-HW'):'&middot; NMEA only'}</h2>
+  Receiver ${n} ${r.mod?'&middot; '+r.mod:''} ${r.ubx?(r.monrf?'&middot; MON-RF':'&middot; MON-HW'):'&middot; NMEA only'}</h2>
+  <div class="row"><span>Bytes received</span><span>${r.bytes}</span></div>
   <div class="row"><span>Level</span><span>${r.level}</span></div>
   <div class="row"><span>Jamming ind.</span><span>${F(r.jam)} / base ${F(r.baseJam,0)}</span></div>
   <div class="row"><span>AGC</span><span>${F(r.agc)} / base ${F(r.baseAgc,0)}</span></div>

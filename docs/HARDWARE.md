@@ -25,9 +25,9 @@ Defaults, all changeable in `firmware/savethesat_c5/config.h`:
 
 | Signal | GPIO | Note |
 |---|---|---|
-| GNSS A — module TX → ESP RX | 12 | HP UART0 |
+| GNSS A — module TX → ESP RX | 12 | HP UART1 |
 | GNSS A — module RX ← ESP TX | 11 | |
-| GNSS B — module TX → ESP RX | 4 | HP UART1 |
+| GNSS B — module TX → ESP RX | 4 | HP UART0 |
 | GNSS B — module RX ← ESP TX | 5 | |
 | 3V3, GND | — | Both modules |
 
@@ -47,7 +47,7 @@ SOC_USB_SERIAL_JTAG_SUPPORTED 1
 SOC_I2C_NUM                   2
 ```
 
-GPIO 4 and 5 are the fixed LP-UART pins, but the GPIO matrix lets HP UART1
+GPIO 4 and 5 are the fixed LP-UART pins, but the GPIO matrix lets HP UART0
 drive them, which is what the firmware does. If you would rather keep them
 free, move receiver B to any other free pins.
 

@@ -70,6 +70,8 @@ static void rxJson(String &o, GnssRx &r, Detection &d) {
   o += ",\"satsUsed\":"; o += r.satsUsed;
   o += ",\"satsVis\":";  o += r.satsVisible;
   o += ",\"fix\":";      o += r.fixValid ? "true" : "false";
+  o += ",\"mod\":\"";    o += r.haveVer ? r.modName : "";
+  o += "\",\"bytes\":";  o += r.rxBytes;
   o += ",\"baseJam\":";  o += String(r.baseJam, 1);
   o += ",\"baseAgc\":";  o += String(r.baseAgc, 0);
   o += ",\"baseCn0\":";  o += String(r.baseCn0, 1);
@@ -195,6 +197,9 @@ void setup() {
 
   Serial.printf("\nSavethesat %s\n  AP  : %s\n  URL : http://%s/ or http://%s.local/\n",
                 FW_VERSION, ssid, WiFi.softAPIP().toString().c_str(), MDNS_HOST);
+  Serial.printf("  GNSS A: UART%d rx=%d tx=%d @%lu\n  GNSS B: UART%d rx=%d tx=%d @%lu\n",
+                GPS_A_UART, GPS_A_RX, GPS_A_TX, (unsigned long)GPS_A_BAUD,
+                GPS_B_UART, GPS_B_RX, GPS_B_TX, (unsigned long)GPS_B_BAUD);
 }
 
 /* ── loop ─────────────────────────────────────────────────────────────────── */
@@ -240,6 +245,30 @@ void loop() {
 
     pushHistory();
   }
+
+#if DEBUG_INTERVAL_MS
+  /* Heartbeat on the USB console, so a wired bench can see what the
+   * receivers are doing without joining the access point. */
+  static uint32_t lastDebug = 0;
+  if (now - lastDebug >= DEBUG_INTERVAL_MS) {
+    lastDebug = now;
+    GnssRx *rx[2] = { &gpsA, &gpsB };
+    Detection *dt[2] = { &detA, &detB };
+    Serial.printf("[%6lus] %s score %u\n", now / 1000, levelName(g_level), g_score);
+    for (int i = 0; i < 2; i++) {
+      Serial.printf("   %c: %-7s bytes=%-8lu %s%s fix=%s sats=%u/%u cn0=%.1f jam=%u agc=%u\n",
+        rx[i]->label,
+        rx[i]->present ? "PRESENT" : "silent",
+        (unsigned long)rx[i]->rxBytes,
+        rx[i]->haveVer ? rx[i]->modName : (rx[i]->haveUbx ? "u-blox" : "no-UBX"),
+        rx[i]->haveMonRf ? " [MON-RF]" : (rx[i]->haveUbx ? " [MON-HW]" : ""),
+        rx[i]->fixValid ? "yes" : "no",
+        rx[i]->satsUsed, rx[i]->satsVisible,
+        rx[i]->cn0Top, rx[i]->jamInd, rx[i]->agcCnt);
+      (void)dt[i];
+    }
+  }
+#endif
 
 #if ESPNOW_ENABLED
   static uint32_t lastBeacon = 0;
