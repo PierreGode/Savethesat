@@ -10,6 +10,7 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <ESPmDNS.h>
+#include <esp_log.h>
 
 #include "config.h"
 #include "ubx.h"
@@ -87,18 +88,8 @@ static void rxJson(String &o, GnssRx &r, Detection &d) {
   o += "}";
 }
 
-static void handleStatus() {
-  String o;
-  o.reserve(1400);
-  o  = "{\"fw\":\"" FW_VERSION "\",\"uptime\":";
-  o += millis() / 1000;
-  o += ",\"level\":\"";  o += levelName(g_level);
-  o += "\",\"score\":";  o += g_score;
-  o += ",\"warmup\":";   o += warmupLeftS();
-  o += ",\"localOnly\":"; o += g_localOnly ? "true" : "false";
-  o += ",\"a\":"; rxJson(o, gpsA, detA);
-  o += ",\"b\":"; rxJson(o, gpsB, detB);
-  o += ",\"peers\":[";
+static void peersJson(String &o) {
+  o += "[";
   bool first = true;
   for (int i = 0; i < ESPNOW_MAX_PEERS; i++) {
     if (!g_peers[i].used) continue;
@@ -113,9 +104,26 @@ static void handleStatus() {
     o += "\",\"score\":"; o += g_peers[i].pkt.score;
     o += ",\"lat\":"; o += String(g_peers[i].pkt.lat1e7 / 1e7, 6);
     o += ",\"lon\":"; o += String(g_peers[i].pkt.lon1e7 / 1e7, 6);
+    o += ",\"ageS\":"; o += (millis() - g_peers[i].lastMs) / 1000;
     o += "}";
   }
-  o += "]}";
+  o += "]";
+}
+
+static void handleStatus() {
+  String o;
+  o.reserve(1400);
+  o  = "{\"fw\":\"" FW_VERSION "\",\"uptime\":";
+  o += millis() / 1000;
+  o += ",\"level\":\"";  o += levelName(g_level);
+  o += "\",\"score\":";  o += g_score;
+  o += ",\"warmup\":";   o += warmupLeftS();
+  o += ",\"localOnly\":"; o += g_localOnly ? "true" : "false";
+  o += ",\"a\":"; rxJson(o, gpsA, detA);
+  o += ",\"b\":"; rxJson(o, gpsB, detB);
+  o += ",\"peers\":";
+  peersJson(o);
+  o += "}";
   server.send(200, "application/json", o);
 }
 
@@ -199,6 +207,55 @@ static void handleHistory() {
   server.send(200, "application/json", o);
 }
 
+/* Everything the device knows, in one object. The serial log emits this
+ * once per interval as a single line, so a bench can pipe the port straight
+ * into jq or a file without the output needing to be parsed out of prose. */
+static void buildSnapshot(String &o) {
+  o = "{\"fw\":\"" FW_VERSION "\",\"t\":";
+  o += millis() / 1000;
+  o += ",\"heap\":";     o += (uint32_t)ESP.getFreeHeap();
+  o += ",\"level\":\"";  o += levelName(g_level);
+  o += "\",\"score\":";  o += g_score;
+  o += ",\"warmup\":";   o += warmupLeftS();
+  o += ",\"localOnly\":"; o += g_localOnly ? "true" : "false";
+  o += ",\"ap\":{\"ssid\":\""; o += g_ssid;
+  o += "\",\"ip\":\"";  o += g_ip;
+  o += "\",\"clients\":"; o += WiFi.softAPgetStationNum();
+  o += ",\"channel\":";  o += AP_CHANNEL;
+  o += "}";
+
+  o += ",\"a\":{\"detect\":";
+  rxJson(o, gpsA, detA);
+  o += ",\"link\":";
+  gnssJson(o, gpsA, GPS_A_UART, GPS_A_RX, GPS_A_TX, GPS_A_BAUD);
+  o += ",\"pos\":{\"lat\":"; o += String(gpsA.lat, 6);
+  o += ",\"lon\":"; o += String(gpsA.lon, 6);
+  o += ",\"hdop\":"; o += String(gpsA.hdop, 2);
+  o += ",\"speedKn\":"; o += String(gpsA.speedKn, 1);
+  o += "}}";
+
+  o += ",\"b\":{\"detect\":";
+  rxJson(o, gpsB, detB);
+  o += ",\"link\":";
+  gnssJson(o, gpsB, GPS_B_UART, GPS_B_RX, GPS_B_TX, GPS_B_BAUD);
+  o += ",\"pos\":{\"lat\":"; o += String(gpsB.lat, 6);
+  o += ",\"lon\":"; o += String(gpsB.lon, 6);
+  o += ",\"hdop\":"; o += String(gpsB.hdop, 2);
+  o += ",\"speedKn\":"; o += String(gpsB.speedKn, 1);
+  o += "}}";
+
+  o += ",\"peers\":";
+  peersJson(o);
+  o += "}";
+}
+
+static void handleAll() {
+  String o;
+  o.reserve(6144);
+  buildSnapshot(o);
+  server.send(200, "application/json", o);
+}
+
 static void handleCsv() {
   String o;
   o.reserve(HISTORY_LEN * 24 + 64);
@@ -227,6 +284,10 @@ static void handleRebase() {
 
 void setup() {
   Serial.begin(115200);
+  /* The Wi-Fi driver logs an error about band mode on this chip that is not
+   * actionable. Silence it so every line on the port is parseable JSON. */
+  esp_log_level_set("wifi", ESP_LOG_NONE);
+  esp_log_level_set("wifi_init", ESP_LOG_NONE);
 
   gpsA.begin('A', &SerialA, GPS_A_UART, GPS_A_RX, GPS_A_TX, GPS_A_BAUD);
   gpsB.begin('B', &SerialB, GPS_B_UART, GPS_B_RX, GPS_B_TX, GPS_B_BAUD);
@@ -253,6 +314,7 @@ void setup() {
   server.on("/api/status",  HTTP_GET,  handleStatus);
   server.on("/api/history", HTTP_GET,  handleHistory);
   server.on("/api/gnss",    HTTP_GET,  handleGnss);
+  server.on("/api/all",     HTTP_GET,  handleAll);
   server.on("/savethesat.csv", HTTP_GET, handleCsv);
   server.on("/api/reset-baseline", HTTP_POST, handleRebase);
   server.onNotFound([]() { server.send(404, "text/plain", "not found"); });
@@ -262,11 +324,14 @@ void setup() {
   satnowBegin();
 #endif
 
-  Serial.printf("  OLED: %s\n", displayBegin() ? "found" : "not fitted");
+  bool g_oledFound = displayBegin();
 
-  Serial.printf("\nSavethesat %s\n  AP  : %s\n  URL : http://%s/ or http://%s.local/\n",
-                FW_VERSION, ssid, WiFi.softAPIP().toString().c_str(), MDNS_HOST);
-  Serial.printf("  GNSS A: UART%d rx=%d tx=%d @%lu\n  GNSS B: UART%d rx=%d tx=%d @%lu\n",
+  Serial.printf("{\"ev\":\"boot\",\"fw\":\"%s\",\"ap\":\"%s\",\"ip\":\"%s\","
+                "\"mdns\":\"%s.local\",\"oled\":%s,"
+                "\"a\":{\"uart\":%d,\"rx\":%d,\"tx\":%d,\"baud\":%lu},"
+                "\"b\":{\"uart\":%d,\"rx\":%d,\"tx\":%d,\"baud\":%lu}}\n",
+                FW_VERSION, ssid, WiFi.softAPIP().toString().c_str(), MDNS_HOST,
+                g_oledFound ? "true" : "false",
                 GPS_A_UART, GPS_A_RX, GPS_A_TX, (unsigned long)GPS_A_BAUD,
                 GPS_B_UART, GPS_B_RX, GPS_B_TX, (unsigned long)GPS_B_BAUD);
 }
@@ -318,27 +383,17 @@ void loop() {
                 gpsA, gpsB, satnowPeerCount());
   }
 
-#if DEBUG_INTERVAL_MS
-  /* Heartbeat on the USB console, so a wired bench can see what the
-   * receivers are doing without joining the access point. */
-  static uint32_t lastDebug = 0;
-  if (now - lastDebug >= DEBUG_INTERVAL_MS) {
-    lastDebug = now;
-    GnssRx *rx[2] = { &gpsA, &gpsB };
-    Detection *dt[2] = { &detA, &detB };
-    Serial.printf("[%6lus] %s score %u\n", now / 1000, levelName(g_level), g_score);
-    for (int i = 0; i < 2; i++) {
-      Serial.printf("   %c: %-7s bytes=%-8lu %s%s fix=%s sats=%u/%u cn0=%.1f jam=%u agc=%u\n",
-        rx[i]->label,
-        rx[i]->present ? "PRESENT" : "silent",
-        (unsigned long)rx[i]->rxBytes,
-        rx[i]->haveVer ? rx[i]->modName : (rx[i]->haveUbx ? "u-blox" : "no-UBX"),
-        rx[i]->haveMonRf ? " [MON-RF]" : (rx[i]->haveUbx ? " [MON-HW]" : ""),
-        rx[i]->fixValid ? "yes" : "no",
-        rx[i]->satsUsed, rx[i]->satsVisible,
-        rx[i]->cn0Top, rx[i]->jamInd, rx[i]->agcCnt);
-      (void)dt[i];
-    }
+#if SERIAL_JSON_MS
+  /* One complete JSON object per line. Non-JSON lines can still appear from
+   * the ESP-IDF log itself, so a consumer should skip lines that do not
+   * parse rather than assume every line is ours. */
+  static uint32_t lastLog = 0;
+  if (now - lastLog >= SERIAL_JSON_MS) {
+    lastLog = now;
+    String j;
+    j.reserve(6144);
+    buildSnapshot(j);
+    Serial.println(j);
   }
 #endif
 

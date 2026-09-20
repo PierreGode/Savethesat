@@ -48,7 +48,8 @@
 #define HISTORY_LEN          600      /* 10 minutes at 1 Hz */
 #define EVENT_LOG_LEN        40
 #define RX_STALE_MS          5000     /* no data this long = receiver absent */
-#define DEBUG_INTERVAL_MS    5000     /* serial heartbeat; 0 disables */
+/* Serial log: one complete JSON object per line, this often. 0 disables. */
+#define SERIAL_JSON_MS       1000
 
 /* Baseline: what "quiet" looks like here. Learned once at startup, then
  * nudged by a slow EWMA only while the level is CLEAR. */

@@ -97,6 +97,32 @@ arduino-cli upload -p /dev/ttyACM0 --fqbn "esp32:esp32:esp32c5:CDCOnBoot=cdc" fi
 Pushing to `main` builds the firmware, merges the image and redeploys the
 flasher automatically.
 
+## Serial log
+
+The USB console emits **one complete JSON object per line**, once a second —
+the verdict, both receivers' detection state and link plumbing, per-constellation
+counts, the full sky view, position, access point state, free heap and any mesh
+peers. The same object is served at `/api/all`.
+
+```bash
+# watch it live
+python3 -c "import serial;p=serial.Serial('/dev/ttyACM0',115200);[print(p.readline().decode().strip()) for _ in iter(int,1)]"
+
+# or straight into jq
+cat /dev/ttyACM0 | jq -c '{t,level,score,a:.a.link.bytes,b:.b.link.bytes}'
+
+# log a session to file
+cat /dev/ttyACM0 > session.ndjson
+```
+
+Newline-delimited JSON, so it appends cleanly, greps usefully and replays into
+anything. The interval is `SERIAL_JSON_MS` in `config.h`; set it to 0 to go
+quiet.
+
+One caveat: the ESP-ROM bootloader prints a few plain-text lines at power-on
+before the firmware runs, and a panic would too. **Skip lines that do not
+parse** rather than assuming every line is ours.
+
 ## Limits, stated plainly
 
 - **One device detects; it does not locate.** Finding a jammer needs motion or
