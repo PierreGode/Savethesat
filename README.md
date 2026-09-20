@@ -97,6 +97,61 @@ arduino-cli upload -p /dev/ttyACM0 --fqbn "esp32:esp32:esp32c5:CDCOnBoot=cdc" fi
 Pushing to `main` builds the firmware, merges the image and redeploys the
 flasher automatically.
 
+## Measured board map
+
+Taken from a real board with `tools/pinmap`, not from a datasheet. Every pin
+read three ways — floating, pulled up, pulled down — so a pin that refuses to
+follow the internal pull is being held by something external.
+
+| GPIO | float | pull-up | pull-down | Reading | Documented as |
+|---|---|---|---|---|---|
+| 0–6 | 0 | 1 | 0 | floating | 0 = button |
+| 7 | **1** | 1 | 0 | weak external pull-up | SD CS |
+| 8, 9, 10 | 1 | 1 | **1** | **driven high** | SD SCK / MISO / MOSI |
+| 11, 12 | 0 | 1 | 0 | **floating** | **GNSS TX / RX** |
+| 23, 24 | 1 | 1 | **1** | **driven high** | I2C SDA / SCL |
+| 25, 26 | 0 | 1 | 0 | floating | — |
+| 27 | **1** | 1 | 0 | weak external pull-up | — |
+| 28 | 1 | 1 | **1** | **driven high** | — |
+
+Two findings worth carrying forward:
+
+- **The button is on GPIO 28, not GPIO 0.** GPIO 0 is floating; 28 is held
+  high, which is what a button with a pull-up looks like at rest. The
+  published map says 0.
+- **GPIO 27 carries an unexplained weak pull-up** and is in no published map.
+
+### Pins never to probe on the ESP32-C5
+
+| GPIO | Why |
+|---|---|
+| 13, 14 | USB D−/D+. Reconfiguring them drops the USB console, and the board then kills its own link on every boot — recovery needs the BOOT button held during a physical replug. |
+| 15–22 | SPI flash. Probing GPIO 15 locked the CPU (`rst:0x1a CPU_LOCKUP`), then `SPI flash busy` and an unbootable image. |
+
+Both learned the hard way. `tools/pinmap` refuses to touch either range.
+
+### Why this board reports no GNSS
+
+**GPIO 11 and 12 are floating.** A powered transmitter holds its idle line
+high, and a connected-but-mute module still presents a load — neither is true
+here. Both pins follow the internal pull in whichever direction it is applied,
+which is the signature of a pin with nothing on the other end.
+
+Backed up by four independent checks, all negative:
+
+- **No UART traffic** at 4800/9600/19200/38400/57600/115200, on every probeable
+  pin, in both orientations.
+- **No pin anywhere is toggling** — zero edges across all 19 probeable GPIOs.
+- **No enable pin.** Every candidate asserted in turn via the internal pull-up;
+  none woke a receiver.
+- **Nothing answers a direct question** — a CASIC `$PCAS06` product query and a
+  u-blox `MON-VER` poll, at three baud rates, drew no reply.
+- **Not on I2C** — six SDA/SCL pairs scanned; only the OLED at `0x3C`.
+
+So the module is not electrically connected to the ESP32 on any pin this tool
+can reach. Firmware cannot fix that, and no amount of re-reading pin maps
+will either.
+
 ## Serial log
 
 The USB console emits **one complete JSON object per line**, once a second —
