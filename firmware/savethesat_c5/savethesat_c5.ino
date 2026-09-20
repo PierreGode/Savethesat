@@ -78,11 +78,12 @@ static void rxJson(String &o, GnssRx &r, Detection &d) {
   o += ",\"baseJam\":";  o += String(r.baseJam, 1);
   o += ",\"baseAgc\":";  o += String(r.baseAgc, 0);
   o += ",\"baseCn0\":";  o += String(r.baseCn0, 1);
-  o += ",\"cJam\":";     o += d.cJam;
-  o += ",\"cAgc\":";     o += d.cAgc;
-  o += ",\"cNoise\":";   o += d.cNoise;
-  o += ",\"cCn0\":";     o += d.cCn0;
-  o += ",\"cFix\":";     o += d.cFix;
+  o += ",\"pJam\":";     o += d.pJam;
+  o += ",\"pAgc\":";     o += d.pAgc;
+  o += ",\"pNoise\":";   o += d.pNoise;
+  o += ",\"pCn0\":";     o += d.pCn0;
+  o += ",\"pFix\":";     o += d.pFix;
+  o += ",\"full\":";     o += d.full ? "true" : "false";
   o += "}";
 }
 

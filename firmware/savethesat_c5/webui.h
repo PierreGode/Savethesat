@@ -51,6 +51,7 @@ font-variant-numeric:tabular-nums}
 .bar i{color:var(--dim);font-style:normal;width:56px;flex:none}
 .bar u{flex:1;height:6px;background:#21262d;border-radius:3px;overflow:hidden}
 .bar u b{display:block;height:100%;background:var(--elev);width:0;transition:width .3s}
+.bar em{font-style:normal;color:var(--warm);font-size:10px;flex:none}
 canvas{width:100%;height:130px;display:block}
 .btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
 button,a.btn{background:var(--card);color:var(--fg);border:1px solid var(--line);
@@ -121,8 +122,10 @@ function rxCard(r,n){
   <div class="row"><span>C/N0 top-8</span><span>${F(r.cn0,1)} / base ${F(r.baseCn0,1)} dBHz</span></div>
   <div class="row"><span>Satellites</span><span>${r.satsUsed} used / ${r.satsVis} visible</span></div>
   <div class="row"><span>Fix</span><span>${r.fix?'yes':'NO'}</span></div>
-  <div class="bars">${[['jamInd',r.cJam/35*100],['AGC',r.cAgc/20*100],
-    ['noise',r.cNoise/10*100],['C/N0',r.cCn0/25*100],['fix',r.cFix/10*100]].map(b).join('')}</div>
+  <div class="bars">${[['jamInd',r.pJam,!r.full],['AGC',r.pAgc,!r.full],
+    ['noise',r.pNoise,!r.full],['C/N0',r.pCn0,false],['fix',r.pFix,false]]
+    .map(x=>`<div class="bar"><i>${x[0]}</i><u><b style="width:${x[2]?0:x[1]}%"></b></u>${x[2]?'<em>n/a</em>':''}</div>`).join('')}</div>
+  ${r.present&&!r.full?'<p class="hint">NMEA-only receiver \u2014 scoring from C/N0 and fix loss alone.</p>':''}
   </div>`;
 }
 

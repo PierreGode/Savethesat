@@ -71,10 +71,15 @@ Full detail, including what this **cannot** do: [docs/DETECTION.md](docs/DETECTI
 | u-blox GNSS ×1–2 | **Must be u-blox** — M10/M9N ideal, M8N fine |
 | USB power bank | Runs all day |
 
-> **The one thing that will bite you:** cheap non-u-blox modules (ATGM336H,
-> generic MTK) emit NMEA only and have **no jamming indicator**. Savethesat
-> falls back to C/N0 and fix-loss on those, but you lose the two strongest
-> signals. Buy u-blox.
+> **The one thing that will bite you:** cheap non-u-blox modules (ATGM336H /
+> AT6558, generic MTK) emit NMEA only and have **no jamming indicator, no AGC
+> and no noise figure** — three of the five signals. Savethesat runs on them
+> from C/N0 collapse and fix loss, renormalising the score so the upper levels
+> stay reachable, but it warns later and false-alarms more.
+> [What you give up →](docs/DETECTION.md#nmea-only-receivers-atgm336h-and-friends)
+>
+> If one is already soldered down, adding a u-blox on the **second** port is a
+> better move than replacing it: full signals from one, cross-check from both.
 
 [Full BOM and wiring →](docs/HARDWARE.md)
 

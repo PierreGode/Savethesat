@@ -81,13 +81,50 @@ exists to enable.
   (time drift against an independent clock, position jumps, C/N0 that is *too*
   uniform).
 
+## NMEA-only receivers (ATGM336H and friends)
+
+Plenty of cheap modules — the ATGM336H / AT6558, most generic MTK parts —
+speak NMEA and nothing else. No UBX means no jamming indicator, no AGC and no
+noise figure: three of the five signals, and 65 of the 100 weight, simply are
+not there.
+
+Savethesat still works on these, from C/N0 collapse and fix loss. The score is
+a weighted **mean over the signals a receiver can actually supply**, not a
+fixed 100-point scale, so the missing weight is renormalised away rather than
+making the upper levels unreachable. Without that, such a module would cap at
+35 and could never report `JAMMED` no matter how completely it was denied.
+
+What you give up is worth being clear about:
+
+- **Later warning.** The jamming indicator and AGC move while the receiver is
+  still tracking fine. C/N0 collapse means it is already losing the fight, so
+  a NMEA-only device notices interference that is already serious.
+- **More false positives.** C/N0 and fix loss are exactly the signals that a
+  tunnel, a car roof or a bad antenna placement also move. With AGC gone, the
+  cross-check that separates "something loud arrived" from "the sky went away"
+  is gone with it.
+- **No receiver second opinion.** `jammingState` from the receiver's own front
+  end is not available to outrank a bad score.
+
+The dashboard marks such a receiver plainly, greys out the three signals it
+cannot supply, and says the verdict rests on C/N0 and fix loss alone.
+
+**The reference channel matters much more here.** With no AGC to tell you
+whether input power rose, a second antenna — deliberately attenuated — is the
+best remaining discriminator between interference and obstruction. See the
+section above.
+
+If you have one NMEA-only module already soldered down, the cheapest useful
+upgrade is not to replace it but to add a u-blox on the second port. You then
+get the full five signals from one receiver and a cross-check from the other.
+
 ## Receiver requirements
 
 The interference telemetry comes from `UBX-MON-RF` (M9, M10) or `UBX-MON-HW`
 (M8). Savethesat polls both once per second and uses whichever answers, so no
 receiver configuration is written and your module's settings are left alone.
 
-**Non-u-blox modules will not work for the primary detection.** ATGM336H,
-generic MTK and most cheap modules emit NMEA only and have no jamming
-indicator. On those, Savethesat falls back to C/N0 and fix-loss alone — which
-works, but loses the two strongest signals.
+**Non-u-blox modules lose the primary detection layer.** ATGM336H, generic MTK
+and most cheap modules emit NMEA only and have no jamming indicator. Savethesat
+degrades to C/N0 and fix loss on those, as described above — usable, later to
+warn, and more prone to false positives.
