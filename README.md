@@ -115,6 +115,16 @@ cat /dev/ttyACM0 | jq -c '{t,level,score,a:.a.link.bytes,b:.b.link.bytes}'
 cat /dev/ttyACM0 > session.ndjson
 ```
 
+Each line also carries a `hw` block: chip model and revision, CPU clock, SDK,
+MAC, flash and PSRAM size, **reset reason**, die temperature, heap free/min/
+largest-block, the I2C bus contents found at boot, and the live logic level of
+every GNSS UART pin.
+
+> Read `rxLevel` carefully. The UART driver pulls its receive pin up, so `1`
+> is the resting default and a disconnected pin reads exactly like a healthy
+> idle one. Only `0` is informative — something is actively holding that line
+> down. To tell "attached" from "not attached", use `bytes`.
+
 Newline-delimited JSON, so it appends cleanly, greps usefully and replays into
 anything. The interval is `SERIAL_JSON_MS` in `config.h`; set it to 0 to go
 quiet.

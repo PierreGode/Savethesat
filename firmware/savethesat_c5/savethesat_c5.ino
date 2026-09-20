@@ -18,6 +18,7 @@
 #include "detect.h"
 #include "espnow_link.h"
 #include "display.h"
+#include "hardware.h"
 #include "webui.h"
 
 static HardwareSerial SerialA(GPS_A_UART);
@@ -213,7 +214,7 @@ static void handleHistory() {
 static void buildSnapshot(String &o) {
   o = "{\"fw\":\"" FW_VERSION "\",\"t\":";
   o += millis() / 1000;
-  o += ",\"heap\":";     o += (uint32_t)ESP.getFreeHeap();
+  o += ",\"hw\":";      hwJson(o);
   o += ",\"level\":\"";  o += levelName(g_level);
   o += "\",\"score\":";  o += g_score;
   o += ",\"warmup\":";   o += warmupLeftS();
@@ -284,6 +285,7 @@ static void handleRebase() {
 
 void setup() {
   Serial.begin(115200);
+  hwInit();
   /* The Wi-Fi driver logs an error about band mode on this chip that is not
    * actionable. Silence it so every line on the port is parseable JSON. */
   esp_log_level_set("wifi", ESP_LOG_NONE);
