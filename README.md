@@ -114,12 +114,14 @@ follow the internal pull is being held by something external.
 | 27 | **1** | 1 | 0 | weak external pull-up | — |
 | 28 | 1 | 1 | **1** | **driven high** | — |
 
-Two findings worth carrying forward:
+- **GPIO 27 and 28 carry pulls that no published map explains.** 27 has a weak
+  external pull-up, 28 is held high. Unidentified.
 
-- **The button is on GPIO 28, not GPIO 0.** GPIO 0 is floating; 28 is held
-  high, which is what a button with a pull-up looks like at rest. The
-  published map says 0.
-- **GPIO 27 carries an unexplained weak pull-up** and is in no published map.
+> **What this test cannot see.** A passive switch to ground reads as *floating*
+> while it is open, because an open switch is an open circuit. So "floating" on
+> GPIO 0 is perfectly consistent with a button being fitted there, and does not
+> contradict the published map. An earlier revision of this table concluded the
+> button had moved to GPIO 28 on that basis; that inference was wrong.
 
 ### Pins never to probe on the ESP32-C5
 
@@ -148,9 +150,22 @@ Backed up by four independent checks, all negative:
   u-blox `MON-VER` poll, at three baud rates, drew no reply.
 - **Not on I2C** — six SDA/SCL pairs scanned; only the OLED at `0x3C`.
 
-So the module is not electrically connected to the ESP32 on any pin this tool
-can reach. Firmware cannot fix that, and no amount of re-reading pin maps
-will either.
+**Independently confirmed by a second firmware.** A different wardriving
+firmware — different author, different NMEA library, same pins — was flashed to
+the same board and reported `chars=0 ok=0 fail=0 sats=0 fix=NO`, with its own
+built-in wiring check raising the same warning about GPIO 12. On that same run
+the SD card initialised on 7/8/9/10, the display initialised on 23/24, and a
+Wi-Fi scan returned 33 networks. The board is healthy; the GNSS receive path
+alone is dead.
+
+That run also corroborates the census from the other direction: the SD bus it
+brought up on GPIO 7/8/9/10 is exactly the set this table measured as driven
+high with a weak pull-up on CS.
+
+So the module is not delivering data to the ESP32 on any pin this tool can
+reach. Two independent firmwares, one electrical census, six baud rates and
+five protocol probes all agree. Firmware cannot fix this — the signal is not
+arriving.
 
 ## Serial log
 
