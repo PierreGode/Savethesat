@@ -5,7 +5,8 @@
 | Part | Notes |
 |---|---|
 | Seeed XIAO ESP32-C5 | Any ESP32-C5 board works; pins are all remappable |
-| u-blox GNSS module ×1–2 | **Must be u-blox.** M10 or M9N ideal, M8N acceptable |
+| SSD1306 OLED (optional) | 128x64 on I2C; absent is fine, the firmware runs headless |
+| GNSS module ×1–2 | u-blox strongly preferred: M10 or M9N ideal, M8N fine. NMEA-only parts work degraded |
 | GNSS antenna ×1–2 | Active patch antenna |
 | USB-C power bank | Runs the board all day |
 
@@ -13,11 +14,18 @@ One module is enough to start. Port B simply reports as absent.
 
 ## Why u-blox specifically
 
-The whole primary detection layer is `UBX-MON-RF` / `UBX-MON-HW` — the
-receiver's own jamming indicator, AGC and noise measurement. Cheap non-u-blox
-modules (ATGM336H, generic MTK, most no-name breakouts) emit NMEA only and
-have none of it. On those, Savethesat still works from C/N0 collapse and fix
-loss, but you lose the two strongest signals. Buy u-blox.
+The primary detection layer is `UBX-MON-RF` / `UBX-MON-HW` — the receiver's own
+jamming indicator, AGC and noise measurement. Cheap non-u-blox modules
+(ATGM336H / AT6558, generic MTK, most no-name breakouts) emit NMEA only and
+have none of it.
+
+Savethesat runs on them anyway, from C/N0 collapse and fix loss, with the score
+renormalised over the signals actually available. But it warns later and false
+alarms more, and the reference channel becomes much more important. The
+trade-off is spelled out in [DETECTION.md](DETECTION.md#nmea-only-receivers-atgm336h-and-friends).
+
+Mixing is the best of both: keep the NMEA-only module on one port and add a
+u-blox on the other.
 
 ## Wiring
 
@@ -25,9 +33,11 @@ Defaults, all changeable in `firmware/savethesat_c5/config.h`:
 
 | Signal | GPIO | Note |
 |---|---|---|
-| GNSS A — module TX → ESP RX | 12 | HP UART0 |
+| OLED SDA | 23 | SSD1306 at 0x3C, probed at boot |
+| OLED SCL | 24 | |
+| GNSS A — module TX → ESP RX | 12 | HP UART1 |
 | GNSS A — module RX ← ESP TX | 11 | |
-| GNSS B — module TX → ESP RX | 4 | HP UART1 |
+| GNSS B — module TX → ESP RX | 4 | HP UART0 |
 | GNSS B — module RX ← ESP TX | 5 | |
 | 3V3, GND | — | Both modules |
 
@@ -47,7 +57,7 @@ SOC_USB_SERIAL_JTAG_SUPPORTED 1
 SOC_I2C_NUM                   2
 ```
 
-GPIO 4 and 5 are the fixed LP-UART pins, but the GPIO matrix lets HP UART1
+GPIO 4 and 5 are the fixed LP-UART pins, but the GPIO matrix lets HP UART0
 drive them, which is what the firmware does. If you would rather keep them
 free, move receiver B to any other free pins.
 

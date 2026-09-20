@@ -8,13 +8,13 @@
 #define FW_VERSION "0.1.0"
 
 /* ── GNSS receiver A — the open-sky antenna, primary detector ──────────── */
-#define GPS_A_UART   0          /* HP UART0 — free, console is USB-Serial-JTAG */
+#define GPS_A_UART   1          /* HP UART1 */
 #define GPS_A_RX     12         /* ESP RX  ← module TX */
 #define GPS_A_TX     11         /* ESP TX  → module RX */
 #define GPS_A_BAUD   9600
 
 /* ── GNSS receiver B — second antenna, or the shielded reference channel ─ */
-#define GPS_B_UART   1          /* HP UART1 */
+#define GPS_B_UART   0          /* HP UART0 — console is USB-Serial-JTAG, so it is free */
 #define GPS_B_RX     4
 #define GPS_B_TX     5
 #define GPS_B_BAUD   9600
@@ -32,12 +32,24 @@
 #define AP_CHANNEL     6              /* 2.4 GHz for phone compatibility */
 #define MDNS_HOST      "savethesat"
 
+/* ── Display ───────────────────────────────────────────────────────────────
+ * SSD1306 OLED on the documented C5 I2C bus. Probed at boot; if it does not
+ * answer, the firmware runs headless without complaint. */
+#define OLED_ENABLED  1
+#define OLED_SDA      23
+#define OLED_SCL      24
+#define OLED_ADDR     0x3C
+#define OLED_W        128
+#define OLED_H        64
+
 /* ── Sampling and detection ───────────────────────────────────────────────── */
 #define SAMPLE_INTERVAL_MS   1000
 #define UBX_POLL_INTERVAL_MS 1000
 #define HISTORY_LEN          600      /* 10 minutes at 1 Hz */
 #define EVENT_LOG_LEN        40
 #define RX_STALE_MS          5000     /* no data this long = receiver absent */
+/* Serial log: one complete JSON object per line, this often. 0 disables. */
+#define SERIAL_JSON_MS       1000
 
 /* Baseline: what "quiet" looks like here. Learned once at startup, then
  * nudged by a slow EWMA only while the level is CLEAR. */

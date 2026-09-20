@@ -10,12 +10,15 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <ESPmDNS.h>
+#include <esp_log.h>
 
 #include "config.h"
 #include "ubx.h"
 #include "gnss.h"
 #include "detect.h"
 #include "espnow_link.h"
+#include "display.h"
+#include "hardware.h"
 #include "webui.h"
 
 static HardwareSerial SerialA(GPS_A_UART);
@@ -29,6 +32,8 @@ static WebServer server(80);
 static uint8_t  hJamA[HISTORY_LEN], hJamB[HISTORY_LEN], hScore[HISTORY_LEN], hLvl[HISTORY_LEN];
 static uint16_t hHead = 0, hCount = 0;
 
+static char g_ssid[33] = {0};
+static char g_ip[17]   = {0};
 static uint8_t g_level = LVL_WARMUP;
 static uint8_t g_score = 0;
 static bool    g_localOnly = false;
@@ -70,29 +75,22 @@ static void rxJson(String &o, GnssRx &r, Detection &d) {
   o += ",\"satsUsed\":"; o += r.satsUsed;
   o += ",\"satsVis\":";  o += r.satsVisible;
   o += ",\"fix\":";      o += r.fixValid ? "true" : "false";
+  o += ",\"mod\":\"";    o += r.haveVer ? r.modName : "";
+  o += "\",\"bytes\":";  o += r.rxBytes;
   o += ",\"baseJam\":";  o += String(r.baseJam, 1);
   o += ",\"baseAgc\":";  o += String(r.baseAgc, 0);
   o += ",\"baseCn0\":";  o += String(r.baseCn0, 1);
-  o += ",\"cJam\":";     o += d.cJam;
-  o += ",\"cAgc\":";     o += d.cAgc;
-  o += ",\"cNoise\":";   o += d.cNoise;
-  o += ",\"cCn0\":";     o += d.cCn0;
-  o += ",\"cFix\":";     o += d.cFix;
+  o += ",\"pJam\":";     o += d.pJam;
+  o += ",\"pAgc\":";     o += d.pAgc;
+  o += ",\"pNoise\":";   o += d.pNoise;
+  o += ",\"pCn0\":";     o += d.pCn0;
+  o += ",\"pFix\":";     o += d.pFix;
+  o += ",\"full\":";     o += d.full ? "true" : "false";
   o += "}";
 }
 
-static void handleStatus() {
-  String o;
-  o.reserve(1400);
-  o  = "{\"fw\":\"" FW_VERSION "\",\"uptime\":";
-  o += millis() / 1000;
-  o += ",\"level\":\"";  o += levelName(g_level);
-  o += "\",\"score\":";  o += g_score;
-  o += ",\"warmup\":";   o += warmupLeftS();
-  o += ",\"localOnly\":"; o += g_localOnly ? "true" : "false";
-  o += ",\"a\":"; rxJson(o, gpsA, detA);
-  o += ",\"b\":"; rxJson(o, gpsB, detB);
-  o += ",\"peers\":[";
+static void peersJson(String &o) {
+  o += "[";
   bool first = true;
   for (int i = 0; i < ESPNOW_MAX_PEERS; i++) {
     if (!g_peers[i].used) continue;
@@ -107,9 +105,86 @@ static void handleStatus() {
     o += "\",\"score\":"; o += g_peers[i].pkt.score;
     o += ",\"lat\":"; o += String(g_peers[i].pkt.lat1e7 / 1e7, 6);
     o += ",\"lon\":"; o += String(g_peers[i].pkt.lon1e7 / 1e7, 6);
+    o += ",\"ageS\":"; o += (millis() - g_peers[i].lastMs) / 1000;
+    o += "}";
+  }
+  o += "]";
+}
+
+static void handleStatus() {
+  String o;
+  o.reserve(1400);
+  o  = "{\"fw\":\"" FW_VERSION "\",\"uptime\":";
+  o += millis() / 1000;
+  o += ",\"level\":\"";  o += levelName(g_level);
+  o += "\",\"score\":";  o += g_score;
+  o += ",\"warmup\":";   o += warmupLeftS();
+  o += ",\"localOnly\":"; o += g_localOnly ? "true" : "false";
+  o += ",\"a\":"; rxJson(o, gpsA, detA);
+  o += ",\"b\":"; rxJson(o, gpsB, detB);
+  o += ",\"peers\":";
+  peersJson(o);
+  o += "}";
+  server.send(200, "application/json", o);
+}
+
+/* GNSS health: the link plumbing, per-constellation view and sky positions.
+ * Kept off /api/status because the sky array is large and the dashboard polls
+ * status every second. */
+static void gnssJson(String &o, GnssRx &r, int uart, int rx, int tx, uint32_t baud) {
+  uint32_t now = millis();
+  o += "{\"present\":"; o += r.present ? "true" : "false";
+  o += ",\"uart\":";    o += uart;
+  o += ",\"rx\":";      o += rx;
+  o += ",\"tx\":";      o += tx;
+  o += ",\"baud\":";    o += baud;
+  o += ",\"bytes\":";   o += r.rxBytes;
+  /* Cast: the unsigned subtraction would turn the -1 sentinel into 4294967295. */
+  o += ",\"nmeaAge\":"; o += r.lastNmeaMs ? (int32_t)((now - r.lastNmeaMs) / 1000) : -1;
+  o += ",\"ubxAge\":";  o += r.lastUbxMs ? (int32_t)((now - r.lastUbxMs) / 1000) : -1;
+  o += ",\"mod\":\"";  o += r.haveVer ? r.modName : "";
+  o += "\",\"sw\":\"";  o += r.haveVer ? r.swVer : "";
+  o += "\",\"hw\":\"";  o += r.haveVer ? r.hwVer : "";
+  o += "\",\"telemetry\":\"";
+  o += r.haveMonRf ? "MON-RF" : (r.haveUbx ? "MON-HW" : (r.present ? "none" : ""));
+  o += "\",\"fix\":";  o += r.fixValid ? "true" : "false";
+  o += ",\"ttff\":";    o += r.firstFixMs ? (int32_t)(r.firstFixMs / 1000) : -1;
+  o += ",\"searching\":";
+  o += r.fixValid ? 0 : (int32_t)((now - (r.noFixSince ? r.noFixSince : 0)) / 1000);
+  o += ",\"antenna\":"; o += r.antStatus;
+  o += ",\"cons\":[";
+  bool first = true;
+  for (uint8_t i = 0; i < NCONS; i++) {
+    if (!r.consInView[i]) continue;
+    if (!first) o += ",";
+    first = false;
+    o += "{\"name\":\""; o += CONS_NAMES[i];
+    o += "\",\"inView\":"; o += r.consInView[i];
+    o += ",\"tracked\":";  o += r.consTracked[i];
+    o += ",\"snrMax\":";   o += r.consSnrMax[i];
+    o += "}";
+  }
+  o += "],\"sky\":[";
+  for (uint8_t i = 0; i < r.skyN; i++) {
+    if (i) o += ",";
+    o += "{\"c\":\""; o += CONS_NAMES[r.sky[i].cons];
+    o += "\",\"prn\":"; o += r.sky[i].prn;
+    o += ",\"el\":";     o += r.sky[i].elev;
+    o += ",\"az\":";     o += r.sky[i].az;
+    o += ",\"snr\":";    o += r.sky[i].snr;
     o += "}";
   }
   o += "]}";
+}
+
+static void handleGnss() {
+  String o;
+  o.reserve(4096);
+  o = "{\"a\":";
+  gnssJson(o, gpsA, GPS_A_UART, GPS_A_RX, GPS_A_TX, GPS_A_BAUD);
+  o += ",\"b\":";
+  gnssJson(o, gpsB, GPS_B_UART, GPS_B_RX, GPS_B_TX, GPS_B_BAUD);
+  o += "}";
   server.send(200, "application/json", o);
 }
 
@@ -130,6 +205,55 @@ static void handleHistory() {
     o += "]";
   }
   o += "}";
+  server.send(200, "application/json", o);
+}
+
+/* Everything the device knows, in one object. The serial log emits this
+ * once per interval as a single line, so a bench can pipe the port straight
+ * into jq or a file without the output needing to be parsed out of prose. */
+static void buildSnapshot(String &o) {
+  o = "{\"fw\":\"" FW_VERSION "\",\"t\":";
+  o += millis() / 1000;
+  o += ",\"hw\":";      hwJson(o);
+  o += ",\"level\":\"";  o += levelName(g_level);
+  o += "\",\"score\":";  o += g_score;
+  o += ",\"warmup\":";   o += warmupLeftS();
+  o += ",\"localOnly\":"; o += g_localOnly ? "true" : "false";
+  o += ",\"ap\":{\"ssid\":\""; o += g_ssid;
+  o += "\",\"ip\":\"";  o += g_ip;
+  o += "\",\"clients\":"; o += WiFi.softAPgetStationNum();
+  o += ",\"channel\":";  o += AP_CHANNEL;
+  o += "}";
+
+  o += ",\"a\":{\"detect\":";
+  rxJson(o, gpsA, detA);
+  o += ",\"link\":";
+  gnssJson(o, gpsA, GPS_A_UART, GPS_A_RX, GPS_A_TX, GPS_A_BAUD);
+  o += ",\"pos\":{\"lat\":"; o += String(gpsA.lat, 6);
+  o += ",\"lon\":"; o += String(gpsA.lon, 6);
+  o += ",\"hdop\":"; o += String(gpsA.hdop, 2);
+  o += ",\"speedKn\":"; o += String(gpsA.speedKn, 1);
+  o += "}}";
+
+  o += ",\"b\":{\"detect\":";
+  rxJson(o, gpsB, detB);
+  o += ",\"link\":";
+  gnssJson(o, gpsB, GPS_B_UART, GPS_B_RX, GPS_B_TX, GPS_B_BAUD);
+  o += ",\"pos\":{\"lat\":"; o += String(gpsB.lat, 6);
+  o += ",\"lon\":"; o += String(gpsB.lon, 6);
+  o += ",\"hdop\":"; o += String(gpsB.hdop, 2);
+  o += ",\"speedKn\":"; o += String(gpsB.speedKn, 1);
+  o += "}}";
+
+  o += ",\"peers\":";
+  peersJson(o);
+  o += "}";
+}
+
+static void handleAll() {
+  String o;
+  o.reserve(6144);
+  buildSnapshot(o);
   server.send(200, "application/json", o);
 }
 
@@ -161,6 +285,11 @@ static void handleRebase() {
 
 void setup() {
   Serial.begin(115200);
+  hwInit();
+  /* The Wi-Fi driver logs an error about band mode on this chip that is not
+   * actionable. Silence it so every line on the port is parseable JSON. */
+  esp_log_level_set("wifi", ESP_LOG_NONE);
+  esp_log_level_set("wifi_init", ESP_LOG_NONE);
 
   gpsA.begin('A', &SerialA, GPS_A_UART, GPS_A_RX, GPS_A_TX, GPS_A_BAUD);
   gpsB.begin('B', &SerialB, GPS_B_UART, GPS_B_RX, GPS_B_TX, GPS_B_BAUD);
@@ -173,6 +302,8 @@ void setup() {
 
   const char *pw = strlen(AP_PASSWORD) >= 8 ? AP_PASSWORD : nullptr;
   WiFi.softAP(ssid, pw, AP_CHANNEL);
+  strncpy(g_ssid, ssid, sizeof g_ssid - 1);
+  strncpy(g_ip, WiFi.softAPIP().toString().c_str(), sizeof g_ip - 1);
 
   /* No DNS server and no default route are offered on purpose — see the note
    * on the dashboard. A captive portal here would cost the operator their
@@ -184,6 +315,8 @@ void setup() {
   });
   server.on("/api/status",  HTTP_GET,  handleStatus);
   server.on("/api/history", HTTP_GET,  handleHistory);
+  server.on("/api/gnss",    HTTP_GET,  handleGnss);
+  server.on("/api/all",     HTTP_GET,  handleAll);
   server.on("/savethesat.csv", HTTP_GET, handleCsv);
   server.on("/api/reset-baseline", HTTP_POST, handleRebase);
   server.onNotFound([]() { server.send(404, "text/plain", "not found"); });
@@ -193,8 +326,16 @@ void setup() {
   satnowBegin();
 #endif
 
-  Serial.printf("\nSavethesat %s\n  AP  : %s\n  URL : http://%s/ or http://%s.local/\n",
-                FW_VERSION, ssid, WiFi.softAPIP().toString().c_str(), MDNS_HOST);
+  bool g_oledFound = displayBegin();
+
+  Serial.printf("{\"ev\":\"boot\",\"fw\":\"%s\",\"ap\":\"%s\",\"ip\":\"%s\","
+                "\"mdns\":\"%s.local\",\"oled\":%s,"
+                "\"a\":{\"uart\":%d,\"rx\":%d,\"tx\":%d,\"baud\":%lu},"
+                "\"b\":{\"uart\":%d,\"rx\":%d,\"tx\":%d,\"baud\":%lu}}\n",
+                FW_VERSION, ssid, WiFi.softAPIP().toString().c_str(), MDNS_HOST,
+                g_oledFound ? "true" : "false",
+                GPS_A_UART, GPS_A_RX, GPS_A_TX, (unsigned long)GPS_A_BAUD,
+                GPS_B_UART, GPS_B_RX, GPS_B_TX, (unsigned long)GPS_B_BAUD);
 }
 
 /* ── loop ─────────────────────────────────────────────────────────────────── */
@@ -239,7 +380,24 @@ void loop() {
     if (g_level == LVL_CLEAR) { gpsA.driftBaseline(); gpsB.driftBaseline(); }
 
     pushHistory();
+
+    displayShow(g_ssid, g_ip, g_level, g_score, warmupLeftS(),
+                gpsA, gpsB, satnowPeerCount());
   }
+
+#if SERIAL_JSON_MS
+  /* One complete JSON object per line. Non-JSON lines can still appear from
+   * the ESP-IDF log itself, so a consumer should skip lines that do not
+   * parse rather than assume every line is ours. */
+  static uint32_t lastLog = 0;
+  if (now - lastLog >= SERIAL_JSON_MS) {
+    lastLog = now;
+    String j;
+    j.reserve(6144);
+    buildSnapshot(j);
+    Serial.println(j);
+  }
+#endif
 
 #if ESPNOW_ENABLED
   static uint32_t lastBeacon = 0;

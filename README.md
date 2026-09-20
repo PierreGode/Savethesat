@@ -22,6 +22,7 @@ and put it on a windowsill, a mast or a dashboard.
 - **Detects** interference from five independent signals, and shows its working
 - **Self-baselining** — no site survey, no calibration, no magic numbers
 - **Phone dashboard** over its own AP, with **your mobile data still working**
+- **OLED status screen** when one is fitted, headless when it is not
 - **ESP-NOW mesh** so several nodes can be worked as a network
 - **Browser flasher** — no toolchain, no IDE, no Arduino install
 - **Receive only.** It never transmits in a GNSS band.
@@ -70,10 +71,15 @@ Full detail, including what this **cannot** do: [docs/DETECTION.md](docs/DETECTI
 | u-blox GNSS ×1–2 | **Must be u-blox** — M10/M9N ideal, M8N fine |
 | USB power bank | Runs all day |
 
-> **The one thing that will bite you:** cheap non-u-blox modules (ATGM336H,
-> generic MTK) emit NMEA only and have **no jamming indicator**. Savethesat
-> falls back to C/N0 and fix-loss on those, but you lose the two strongest
-> signals. Buy u-blox.
+> **The one thing that will bite you:** cheap non-u-blox modules (ATGM336H /
+> AT6558, generic MTK) emit NMEA only and have **no jamming indicator, no AGC
+> and no noise figure** — three of the five signals. Savethesat runs on them
+> from C/N0 collapse and fix loss, renormalising the score so the upper levels
+> stay reachable, but it warns later and false-alarms more.
+> [What you give up →](docs/DETECTION.md#nmea-only-receivers-atgm336h-and-friends)
+>
+> If one is already soldered down, adding a u-blox on the **second** port is a
+> better move than replacing it: full signals from one, cross-check from both.
 
 [Full BOM and wiring →](docs/HARDWARE.md)
 
@@ -90,6 +96,42 @@ arduino-cli upload -p /dev/ttyACM0 --fqbn "esp32:esp32:esp32c5:CDCOnBoot=cdc" fi
 
 Pushing to `main` builds the firmware, merges the image and redeploys the
 flasher automatically.
+
+## Serial log
+
+The USB console emits **one complete JSON object per line**, once a second —
+the verdict, both receivers' detection state and link plumbing, per-constellation
+counts, the full sky view, position, access point state, free heap and any mesh
+peers. The same object is served at `/api/all`.
+
+```bash
+# watch it live
+python3 -c "import serial;p=serial.Serial('/dev/ttyACM0',115200);[print(p.readline().decode().strip()) for _ in iter(int,1)]"
+
+# or straight into jq
+cat /dev/ttyACM0 | jq -c '{t,level,score,a:.a.link.bytes,b:.b.link.bytes}'
+
+# log a session to file
+cat /dev/ttyACM0 > session.ndjson
+```
+
+Each line also carries a `hw` block: chip model and revision, CPU clock, SDK,
+MAC, flash and PSRAM size, **reset reason**, die temperature, heap free/min/
+largest-block, the I2C bus contents found at boot, and the live logic level of
+every GNSS UART pin.
+
+> Read `rxLevel` carefully. The UART driver pulls its receive pin up, so `1`
+> is the resting default and a disconnected pin reads exactly like a healthy
+> idle one. Only `0` is informative — something is actively holding that line
+> down. To tell "attached" from "not attached", use `bytes`.
+
+Newline-delimited JSON, so it appends cleanly, greps usefully and replays into
+anything. The interval is `SERIAL_JSON_MS` in `config.h`; set it to 0 to go
+quiet.
+
+One caveat: the ESP-ROM bootloader prints a few plain-text lines at power-on
+before the firmware runs, and a panic would too. **Skip lines that do not
+parse** rather than assuming every line is ours.
 
 ## Limits, stated plainly
 

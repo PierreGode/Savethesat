@@ -1,6 +1,5 @@
 /* Savethesat web flasher — esptool-js over Web Serial.
  *
- * Adapted from the Ragnar / Piglet flasher (MIT).
  * Flashes a single merged image at offset 0; the GitHub Actions workflow
  * builds bootloader + partitions + boot_app0 + app into that one file.
  */

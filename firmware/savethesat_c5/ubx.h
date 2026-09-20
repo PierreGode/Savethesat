@@ -11,6 +11,7 @@
 #define UBX_CLASS_MON 0x0A
 #define UBX_ID_MON_HW 0x09   /* M8: jamInd, agcCnt, noisePerMS            */
 #define UBX_ID_MON_RF 0x38   /* M9/M10: the same, plus per-band jammingState */
+#define UBX_ID_MON_VER 0x04  /* receiver software, hardware and module name    */
 
 #define UBX_MAX_PAYLOAD 320
 
