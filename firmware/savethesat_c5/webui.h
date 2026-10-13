@@ -210,7 +210,9 @@ function healthCard(h,n){
          h.telemetry==='none'?'bad':(h.telemetry?'good':''));
   if(h.mod) o+=row('Module',h.mod);
   if(h.sw)  o+=row('Firmware',h.sw);
-  o+=row('Fix',h.fix?'yes':'NO',h.fix?'good':'bad');
+  o+=row('Fix',h.fix?(h.fixType==3?'3D':'2D'):'NO',h.fix?'good':'bad');
+  if(h.antText) o+=row('Antenna',h.antText,
+    /OK/.test(h.antText)?'good':'bad');
   o+=row('Time to first fix',h.ttff<0?'not yet':h.ttff+'s');
   if(!h.fix) o+=row('Searching',h.searching+'s',h.searching>120?'warnv':'');
   if(h.antenna) o+=row('Antenna',['init','unknown','OK','short','open'][h.antenna]||h.antenna);

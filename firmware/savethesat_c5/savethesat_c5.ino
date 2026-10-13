@@ -152,6 +152,8 @@ static void gnssJson(String &o, GnssRx &r, int uart, int rx, int tx, uint32_t ba
   o += ",\"searching\":";
   o += r.fixValid ? 0 : (int32_t)((now - (r.noFixSince ? r.noFixSince : 0)) / 1000);
   o += ",\"antenna\":"; o += r.antStatus;
+  o += ",\"antText\":\""; o += r.antText;
+  o += "\",\"fixType\":"; o += r.fixType;
   o += ",\"cons\":[";
   bool first = true;
   for (uint8_t i = 0; i < NCONS; i++) {

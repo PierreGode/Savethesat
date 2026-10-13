@@ -72,6 +72,11 @@ class GnssRx {
   uint8_t  consTracked[NCONS] = {0};
   uint8_t  consSnrMax[NCONS]  = {0};
 
+  /* antenna state, straight from the module's own $GxTXT report */
+  char     antText[24] = {0};
+  /* GSA fix type: 1 none, 2 = 2D, 3 = 3D */
+  uint8_t  fixType = 1;
+
   /* fix timing */
   uint32_t firstFixMs = 0;    /* 0 until the first fix ever */
   uint32_t noFixSince = 0;    /* when the current search started */
@@ -335,6 +340,18 @@ class GnssRx {
       fixValid = (a[0] == 'A');
       noteFix();
       field(7, a, sizeof a); if (a[0]) speedKn = atof(a);
+    } else if (!strncmp(t, "TXT", 3)) {
+      /* $GxTXT,01,01,01,ANTENNA OK — these modules report antenna state in
+       * plain text, and ANTENNA OPEN is the difference between a receiver
+       * that is merely unlucky and one that will never say a word. */
+      field(4, a, sizeof a);
+      if (strstr(a, "ANTENNA")) {
+        strncpy(antText, a, sizeof antText - 1);
+        antText[sizeof antText - 1] = 0;
+      }
+    } else if (!strncmp(t, "GSA", 3)) {
+      field(2, a, sizeof a);
+      if (a[0]) fixType = (uint8_t)atoi(a);
     } else if (!strncmp(t, "GSV", 3)) {
       uint8_t ci = consIndex(line_[1], line_[2]);
       field(3, a, sizeof a);
@@ -347,6 +364,12 @@ class GnssRx {
         char pr[16], el[16], az[16];
         field(4 + s * 4, pr, sizeof pr);
         if (!pr[0]) continue;
+        /* NMEA 4.10 appends a signal-id field after the satellite blocks, so
+         * a sentence reporting nothing still ends ",00,0" and that trailing 0
+         * reads as a satellite block. PRN 0 is never valid, which is the
+         * cheapest way to tell a real satellite from that field. */
+        uint8_t prn = (uint8_t)atoi(pr);
+        if (prn == 0) continue;
         field(5 + s * 4, el, sizeof el);
         field(6 + s * 4, az, sizeof az);
         field(7 + s * 4, a,  sizeof a);
@@ -360,7 +383,7 @@ class GnssRx {
         if (skyAccN_ < MAX_SKY) {
           SatView &v = skyAcc_[skyAccN_++];
           v.cons = ci;
-          v.prn  = (uint8_t)atoi(pr);
+          v.prn  = prn;
           v.elev = el[0] ? (int8_t)atoi(el) : -1;
           v.az   = az[0] ? (uint16_t)atoi(az) : 0;
           v.snr  = cno;

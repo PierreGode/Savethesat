@@ -132,40 +132,51 @@ follow the internal pull is being held by something external.
 
 Both learned the hard way. `tools/pinmap` refuses to touch either range.
 
-### Why this board reports no GNSS
+### A silent receiver: how this one was resolved
 
-**GPIO 11 and 12 are floating.** A powered transmitter holds its idle line
-high, and a connected-but-mute module still presents a load — neither is true
-here. Both pins follow the internal pull in whichever direction it is applied,
-which is the signature of a pin with nothing on the other end.
+This board produced no GNSS data at all, and the cause turned out to be a
+**badly seated antenna connector**. Worth recording, because the symptom is
+deeply misleading: this module emits *nothing whatsoever* without a good
+antenna connection — no NMEA, not even the empty "searching" sentences almost
+every other receiver sends regardless. Its transmit pin stays idle, so the pin
+reads floating and every test says "nothing attached".
 
-Backed up by four independent checks, all negative:
+Measurements taken while it was faulty, all of which pointed the wrong way:
 
-- **No UART traffic** at 4800/9600/19200/38400/57600/115200, on every probeable
-  pin, in both orientations.
-- **No pin anywhere is toggling** — zero edges across all 19 probeable GPIOs.
-- **No enable pin.** Every candidate asserted in turn via the internal pull-up;
-  none woke a receiver.
-- **Nothing answers a direct question** — a CASIC `$PCAS06` product query and a
-  u-blox `MON-VER` poll, at three baud rates, drew no reply.
-- **Not on I2C** — six SDA/SCL pairs scanned; only the OLED at `0x3C`.
+- GPIO 11 and 12 read floating, following the internal pull in both directions
+- No UART traffic at any of six baud rates, on any probeable pin
+- Zero edges on all 19 probeable GPIOs
+- No reply to a CASIC `$PCAS06` query or a u-blox `MON-VER` poll
+- A second, unrelated firmware reported `chars=0` on the same pins
 
-**Independently confirmed by a second firmware.** A different wardriving
-firmware — different author, different NMEA library, same pins — was flashed to
-the same board and reported `chars=0 ok=0 fail=0 sats=0 fix=NO`, with its own
-built-in wiring check raising the same warning about GPIO 12. On that same run
-the SD card initialised on 7/8/9/10, the display initialised on 23/24, and a
-Wi-Fi scan returned 33 networks. The board is healthy; the GNSS receive path
-alone is dead.
+Every one of those was accurate, and the conclusion drawn from them — that the
+module was not connected — was wrong. **A dead-silent GNSS module is an antenna
+fault until proven otherwise**, and the solder joints are the last thing to
+suspect, not the first.
 
-That run also corroborates the census from the other direction: the SD bus it
-brought up on GPIO 7/8/9/10 is exactly the set this table measured as driven
-high with a weak pull-up on CS.
+### Check the antenna in software first
 
-So the module is not delivering data to the ESP32 on any pin this tool can
-reach. Two independent firmwares, one electrical census, six baud rates and
-five protocol probes all agree. Firmware cannot fix this — the signal is not
-arriving.
+These modules say so themselves:
+
+```
+$GPTXT,01,01,01,ANTENNA OK*35
+```
+
+Savethesat parses that and shows it on the GNSS health card, in red when it is
+anything but OK. One sentence would have settled the question immediately.
+
+### A GSV gotcha worth knowing
+
+NMEA 4.10 appends a **signal-id field** after the satellite blocks in a GSV
+sentence. A receiver tracking nothing still sends:
+
+```
+$GPGSV,1,1,00,0*65
+```
+
+That trailing `0` sits exactly where the first satellite's PRN would be, so a
+naive parser invents a phantom satellite every second. PRN 0 is never valid,
+which is the cheapest reliable way to tell them apart.
 
 ## Serial log
 
