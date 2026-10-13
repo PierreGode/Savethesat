@@ -59,10 +59,13 @@ jobs:
           arduino-cli lib install "Adafruit GFX Library"@1.12.6
           arduino-cli lib install "Adafruit BusIO"@1.17.4
 
+      # huge_app: 3MB app, no OTA. The default 4MB-with-spiffs scheme leaves
+      # 1.31MB and the SD and display code had it at 94% — too close to add
+      # anything. Nothing here uses OTA.
       - name: Compile
         run: |
           arduino-cli compile \
-            --fqbn "esp32:esp32:esp32c5:CDCOnBoot=cdc" \
+            --fqbn "esp32:esp32:esp32c5:CDCOnBoot=cdc,PartitionScheme=huge_app" \
             --export-binaries \
             firmware/savethesat_c5
 

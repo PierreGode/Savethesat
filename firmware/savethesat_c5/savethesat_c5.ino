@@ -19,6 +19,7 @@
 #include "espnow_link.h"
 #include "display.h"
 #include "hardware.h"
+#include "sdlog.h"
 #include "webui.h"
 
 static HardwareSerial SerialA(GPS_A_UART);
@@ -29,6 +30,11 @@ static Detection detA, detB;
 static WebServer server(80);
 
 /* Rolling history for the chart and the CSV export. */
+/* Coarse long trend, one sample every 30 s, so the chart can show hours
+ * rather than the ten minutes the 1 Hz buffer holds. */
+static uint8_t  tScore[TREND_LEN], tCn0[TREND_LEN], tJam[TREND_LEN];
+static uint16_t tHead = 0, tCount = 0;
+
 static uint8_t  hJamA[HISTORY_LEN], hJamB[HISTORY_LEN], hScore[HISTORY_LEN], hLvl[HISTORY_LEN];
 static uint16_t hHead = 0, hCount = 0;
 
@@ -88,6 +94,63 @@ static void rxJson(String &o, GnssRx &r, Detection &d) {
   o += ",\"full\":";     o += d.full ? "true" : "false";
   o += "}";
 }
+
+static void pushTrend() {
+  tScore[tHead] = g_score;
+  tCn0[tHead]   = (uint8_t)gpsA.cn0Top;
+  tJam[tHead]   = gpsA.jamInd;
+  tHead = (tHead + 1) % TREND_LEN;
+  if (tCount < TREND_LEN) tCount++;
+}
+
+static void handleTrend() {
+  String o;
+  o.reserve(TREND_LEN * 12 + 64);
+  o = "{\"intervalS\":";
+  o += TREND_INTERVAL_MS / 1000;
+  const char *names[3] = { "score", "cn0", "jam" };
+  uint8_t *srcs[3] = { tScore, tCn0, tJam };
+  for (int s = 0; s < 3; s++) {
+    o += ",\""; o += names[s]; o += "\":[";
+    uint16_t start = (tHead + TREND_LEN - tCount) % TREND_LEN;
+    for (uint16_t i = 0; i < tCount; i++) {
+      if (i) o += ",";
+      o += srcs[s][(start + i) % TREND_LEN];
+    }
+    o += "]";
+  }
+  o += "}";
+  server.send(200, "application/json", o);
+}
+
+static void handleLogs() {
+  String o;
+  o.reserve(2048);
+  o = "{\"sd\":";
+  sdJson(o);
+  o += ",\"files\":";
+  sdListJson(o);
+  o += "}";
+  server.send(200, "application/json", o);
+}
+
+#if SD_ENABLED
+/* Download one log. The name is taken from the listing, and anything with a
+ * path separator in it is refused rather than joined onto the directory. */
+static void handleSdFile() {
+  String name = server.arg("f");
+  if (!g_sdUp || !name.length() || name.indexOf('/') >= 0 || name.indexOf("..") >= 0) {
+    server.send(400, "text/plain", "bad name");
+    return;
+  }
+  String path = String(SD_DIR "/") + name;
+  File f = SD.open(path, FILE_READ);
+  if (!f) { server.send(404, "text/plain", "not found"); return; }
+  server.sendHeader("Content-Disposition", "attachment; filename=" + name);
+  server.streamFile(f, "text/csv");
+  f.close();
+}
+#endif
 
 static void peersJson(String &o) {
   o += "[";
@@ -217,6 +280,7 @@ static void buildSnapshot(String &o) {
   o = "{\"fw\":\"" FW_VERSION "\",\"t\":";
   o += millis() / 1000;
   o += ",\"hw\":";      hwJson(o);
+  o += ",\"sd\":";      sdJson(o);
   o += ",\"level\":\"";  o += levelName(g_level);
   o += "\",\"score\":";  o += g_score;
   o += ",\"warmup\":";   o += warmupLeftS();
@@ -319,6 +383,11 @@ void setup() {
   server.on("/api/history", HTTP_GET,  handleHistory);
   server.on("/api/gnss",    HTTP_GET,  handleGnss);
   server.on("/api/all",     HTTP_GET,  handleAll);
+  server.on("/api/trend",   HTTP_GET,  handleTrend);
+  server.on("/api/logs",    HTTP_GET,  handleLogs);
+#if SD_ENABLED
+  server.on("/sd",          HTTP_GET,  handleSdFile);
+#endif
   server.on("/savethesat.csv", HTTP_GET, handleCsv);
   server.on("/api/reset-baseline", HTTP_POST, handleRebase);
   server.onNotFound([]() { server.send(404, "text/plain", "not found"); });
@@ -328,14 +397,15 @@ void setup() {
   satnowBegin();
 #endif
 
+  bool sdOk = sdBegin();
   bool g_oledFound = displayBegin();
 
   Serial.printf("{\"ev\":\"boot\",\"fw\":\"%s\",\"ap\":\"%s\",\"ip\":\"%s\","
-                "\"mdns\":\"%s.local\",\"oled\":%s,"
+                "\"mdns\":\"%s.local\",\"oled\":%s,\"sd\":%s,"
                 "\"a\":{\"uart\":%d,\"rx\":%d,\"tx\":%d,\"baud\":%lu},"
                 "\"b\":{\"uart\":%d,\"rx\":%d,\"tx\":%d,\"baud\":%lu}}\n",
                 FW_VERSION, ssid, WiFi.softAPIP().toString().c_str(), MDNS_HOST,
-                g_oledFound ? "true" : "false",
+                g_oledFound ? "true" : "false", sdOk ? "true" : "false",
                 GPS_A_UART, GPS_A_RX, GPS_A_TX, (unsigned long)GPS_A_BAUD,
                 GPS_B_UART, GPS_B_RX, GPS_B_TX, (unsigned long)GPS_B_BAUD);
 }
@@ -385,6 +455,14 @@ void loop() {
 
     displayShow(g_ssid, g_ip, g_level, g_score, warmupLeftS(),
                 gpsA, gpsB, satnowPeerCount());
+
+    sdLogRow(g_level, g_score, gpsA, gpsB, levelName(g_level), temperatureRead());
+
+    static uint32_t lastTrend = 0;
+    if (!lastTrend || now - lastTrend >= TREND_INTERVAL_MS) {
+      lastTrend = now;
+      pushTrend();
+    }
   }
 
 #if SERIAL_JSON_MS

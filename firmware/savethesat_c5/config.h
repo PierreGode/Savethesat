@@ -42,6 +42,21 @@
 #define OLED_W        128
 #define OLED_H        64
 
+/* ── SD card ───────────────────────────────────────────────────────────────
+ * Shares no pins with the GNSS UARTs or the display bus. Probed at boot; a
+ * board with no card runs without one and says so. */
+#define SD_ENABLED    1
+#define SD_CS         7
+#define SD_SCK        8
+#define SD_MISO       9
+#define SD_MOSI       10
+#define SD_DIR        "/savethesat"
+#define SD_FLUSH_ROWS 10        /* flush this often: survives a yank, spares the card */
+
+/* Long trend held in RAM and served to the chart. 30 s x 720 = 6 hours. */
+#define TREND_LEN         720
+#define TREND_INTERVAL_MS 30000
+
 /* ── Sampling and detection ───────────────────────────────────────────────── */
 #define SAMPLE_INTERVAL_MS   1000
 #define UBX_POLL_INTERVAL_MS 1000

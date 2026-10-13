@@ -90,8 +90,9 @@ nothing to install beyond the ESP32 core.
 
 ```bash
 arduino-cli core install esp32:esp32@3.3.0
-arduino-cli compile --fqbn "esp32:esp32:esp32c5:CDCOnBoot=cdc" firmware/savethesat_c5
-arduino-cli upload -p /dev/ttyACM0 --fqbn "esp32:esp32:esp32c5:CDCOnBoot=cdc" firmware/savethesat_c5
+FQBN="esp32:esp32:esp32c5:CDCOnBoot=cdc,PartitionScheme=huge_app"
+arduino-cli compile --fqbn "$FQBN" firmware/savethesat_c5
+arduino-cli upload -p /dev/ttyACM0 --fqbn "$FQBN" firmware/savethesat_c5
 ```
 
 Pushing to `main` builds the firmware, merges the image and redeploys the
@@ -177,6 +178,40 @@ $GPGSV,1,1,00,0*65
 That trailing `0` sits exactly where the first satellite's PRN would be, so a
 naive parser invents a phantom satellite every second. PRN 0 is never valid,
 which is the cheapest reliable way to tell them apart.
+
+## SD logging
+
+With a card fitted, every sample is appended to `\/savethesat\/logNNNN.csv` —
+one file per session, numbered, so a power cycle never overwrites the last run.
+
+```
+uptime_s,utc,level,score,lat,lon,fix,sats_used,sats_vis,
+cn0_a,jam_a,agc_a,noise_a,ant_a,cn0_b,jam_b,agc_b,tempC
+```
+
+Plain CSV that opens in a spreadsheet without ceremony. Flushed every ten rows,
+because a field unit loses power without warning and an unflushed buffer is a
+lost event.
+
+The **Storage** card on the dashboard shows the card size, the file being
+written, the row count and any write errors, and lists every saved log with a
+download link — so a session can be pulled off over Wi-Fi without unseating the
+card.
+
+A board with no card runs unchanged and says so. What you lose is permanence:
+the trend chart is then RAM only and starts again from empty at every boot.
+
+### Two timescales
+
+| Chart | Source | Span | Resolution |
+|---|---|---|---|
+| Last 10 minutes | RAM | 10 min | 1 s |
+| Trend | RAM | 6 hours | 30 s |
+| CSV on the card | SD | the whole session | 1 s |
+
+The 1 Hz buffer is for watching an event unfold. The trend is for noticing one
+you were not watching. The card is for everything afterwards — the honest
+record, at full resolution, long after both buffers have rolled over.
 
 ## Serial log
 

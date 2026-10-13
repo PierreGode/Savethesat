@@ -91,6 +91,20 @@ letter-spacing:.5px;margin:12px 0 4px}
 letter-spacing:.6px;margin:18px 0 8px">GNSS health</h2>
 <div class="grid" id="gnss"></div>
 
+<div class="card" style="margin-bottom:14px">
+  <h2>Trend &mdash; last 6 hours</h2>
+  <canvas id="trend" width="700" height="110"></canvas>
+  <div class="legend" style="margin-top:6px">
+    <span><i style="background:#f85149"></i>score</span>
+    <span><i style="background:#3fb950"></i>C/N0</span>
+  </div>
+</div>
+
+<div class="card" style="margin-bottom:14px">
+  <h2>Storage</h2>
+  <div id="sd">no card</div>
+</div>
+
 <div class="card">
   <h2>Mesh</h2>
   <div class="peers" id="peers">no other nodes heard</div>
@@ -242,12 +256,57 @@ function healthCard(h,n){
   return o+'</div>';
 }
 
+async function trend(){
+  let h; try{ h=await (await fetch('/api/trend')).json(); }catch(e){ return; }
+  const c=$('trend'),x=c.getContext('2d'),W=c.width,H=c.height;
+  x.clearRect(0,0,W,H);
+  x.strokeStyle='#30363d';x.lineWidth=1;
+  for(let i=0;i<=3;i++){const y=H*i/3+.5;x.beginPath();x.moveTo(0,y);x.lineTo(W,y);x.stroke();}
+  if(!h.score||!h.score.length){
+    x.fillStyle='#8b949e';x.font='12px sans-serif';
+    x.fillText('collecting \u2014 one point every '+h.intervalS+'s',10,H/2);
+    return;
+  }
+  const n=h.score.length,dx=W/Math.max(n-1,1);
+  const line=(arr,col,max)=>{x.strokeStyle=col;x.lineWidth=2;x.beginPath();
+    arr.forEach((v,i)=>{const y=H-(v/max)*H;i?x.lineTo(i*dx,y):x.moveTo(i*dx,y);});x.stroke();};
+  line(h.cn0,'#3fb950',50);
+  line(h.score,'#f85149',100);
+  const span=(n*h.intervalS/60).toFixed(0);
+  x.fillStyle='#8b949e';x.font='11px sans-serif';
+  x.fillText(span+' min of history',6,12);
+}
+
+async function storage(){
+  let h; try{ h=await (await fetch('/api/logs')).json(); }catch(e){ return; }
+  const s=h.sd||{};
+  if(!s.present){
+    $('sd').innerHTML='<div class="row"><span>Card</span><span class="bad">not detected</span></div>'+
+      '<p class="hint">Without a card the trend above is kept in RAM only and is lost on reboot.</p>';
+    return;
+  }
+  let o='<div class="row"><span>Card</span><span class="good">'+s.sizeMB+' MB</span></div>';
+  o+='<div class="row"><span>Logging to</span><span>'+s.file+'</span></div>';
+  o+='<div class="row"><span>Rows written</span><span>'+s.rows+'</span></div>';
+  if(s.errors) o+='<div class="row"><span>Write errors</span><span class="bad">'+s.errors+'</span></div>';
+  if((h.files||[]).length){
+    o+='<div class="sub">Saved logs</div>';
+    h.files.slice().reverse().forEach(f=>{
+      const kb=(f.bytes/1024).toFixed(1);
+      o+='<div class="row"><span><a href="/sd?f='+encodeURIComponent(f.name)+
+         '" download>'+f.name+'</a></span><span>'+kb+' KB</span></div>';
+    });
+  }
+  $('sd').innerHTML=o;
+}
+
 async function gnss(){
   let h; try{ h=await (await fetch('/api/gnss')).json(); }catch(e){ return; }
   $('gnss').innerHTML=healthCard(h.a,'A')+healthCard(h.b,'B');
 }
 
 function rebase(){ fetch('/api/reset-baseline',{method:'POST'}).then(tick); }
-tick(); chart(); gnss();
+tick(); chart(); gnss(); trend(); storage();
 setInterval(tick,1000); setInterval(chart,5000); setInterval(gnss,3000);
+setInterval(trend,30000); setInterval(storage,15000);
 </script></body></html>)HTMLPAGE";
