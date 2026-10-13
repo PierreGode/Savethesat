@@ -181,7 +181,7 @@ which is the cheapest reliable way to tell them apart.
 
 ## SD logging
 
-With a card fitted, every sample is appended to `\/savethesat\/logNNNN.csv` —
+With a card fitted, every sample is appended to `/savethesat/logNNNN.csv` —
 one file per session, numbered, so a power cycle never overwrites the last run.
 
 ```
